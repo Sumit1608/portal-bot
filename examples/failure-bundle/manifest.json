@@ -1,0 +1,198 @@
+{
+  "run_id": "eval-6-broken",
+  "status": "failed",
+  "started_at": "2026-10-24T17:55:21+00:00",
+  "finished_at": "2026-10-24T17:56:55+00:00",
+  "total_seconds": 94.471,
+  "input_file": "inputs/example.json",
+  "inputs": {
+    "base_repo": "[REDACTED]/portal-bot",
+    "base_branch": "main",
+    "head_repo": "[REDACTED]/portal-bot",
+    "head_branch": "demo-feature-a",
+    "label": "feature-a"
+  },
+  "session": {
+    "reused": true,
+    "full_login": false,
+    "dead_session_reason": null
+  },
+  "pages_visited": [
+    {
+      "url": "https://github.com/settings/profile",
+      "title": "Your profile",
+      "stage": "session_check",
+      "at": "2026-10-24T17:55:24+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot",
+      "title": "[REDACTED]/portal-bot",
+      "stage": "navigate",
+      "at": "2026-10-24T17:55:26+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/pulls",
+      "title": "Pull requests \u00b7 [REDACTED]/portal-bot",
+      "stage": "navigate",
+      "at": "2026-10-24T17:55:28+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/compare",
+      "title": "Compare \u00b7 [REDACTED]/portal-bot",
+      "stage": "navigate",
+      "at": "2026-10-24T17:55:30+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/compare/[REDACTED]:portal-bot:main...main",
+      "title": "Comparing main...main \u00b7 [REDACTED]/portal-bot",
+      "stage": "fill_form",
+      "at": "2026-10-24T17:55:37+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot",
+      "title": "[REDACTED]/portal-bot",
+      "stage": "navigate",
+      "at": "2026-10-24T17:55:56+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/pulls",
+      "title": "Pull requests \u00b7 [REDACTED]/portal-bot",
+      "stage": "navigate",
+      "at": "2026-10-24T17:55:58+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/compare",
+      "title": "Compare \u00b7 [REDACTED]/portal-bot",
+      "stage": "navigate",
+      "at": "2026-10-24T17:56:00+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/compare/[REDACTED]:portal-bot:main...main",
+      "title": "Comparing main...main \u00b7 [REDACTED]/portal-bot",
+      "stage": "fill_form",
+      "at": "2026-10-24T17:56:07+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot",
+      "title": "[REDACTED]/portal-bot",
+      "stage": "navigate",
+      "at": "2026-10-24T17:56:28+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/pulls",
+      "title": "Pull requests \u00b7 [REDACTED]/portal-bot",
+      "stage": "navigate",
+      "at": "2026-10-24T17:56:30+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/compare",
+      "title": "Compare \u00b7 [REDACTED]/portal-bot",
+      "stage": "navigate",
+      "at": "2026-10-24T17:56:32+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/compare/[REDACTED]:portal-bot:main...main",
+      "title": "Comparing main...main \u00b7 [REDACTED]/portal-bot",
+      "stage": "fill_form",
+      "at": "2026-10-24T17:56:39+00:00"
+    }
+  ],
+  "stages": [
+    {
+      "key": "load_inputs",
+      "status": "ok",
+      "seconds": 0.001
+    },
+    {
+      "key": "launch_browser",
+      "attempt": 1,
+      "status": "ok",
+      "seconds": 0.34
+    },
+    {
+      "key": "session_check",
+      "attempt": 1,
+      "status": "ok",
+      "seconds": 2.758
+    },
+    {
+      "key": "navigate",
+      "attempt": 1,
+      "status": "ok",
+      "seconds": 5.605
+    },
+    {
+      "key": "fill_form",
+      "attempt": 1,
+      "status": "failed",
+      "seconds": 22.564
+    },
+    {
+      "key": "navigate",
+      "attempt": 2,
+      "status": "ok",
+      "seconds": 5.211
+    },
+    {
+      "key": "fill_form",
+      "attempt": 2,
+      "status": "failed",
+      "seconds": 22.7
+    },
+    {
+      "key": "navigate",
+      "attempt": 3,
+      "status": "ok",
+      "seconds": 5.285
+    },
+    {
+      "key": "fill_form",
+      "attempt": 3,
+      "status": "failed",
+      "seconds": 22.474
+    }
+  ],
+  "captured_files": [],
+  "retries": [
+    {
+      "step": "form",
+      "attempt": 1,
+      "error_type": "ResolveError",
+      "error": "Could not find 'compare.base_branch' (role=not found, label=not found, structure=not found, id_or_class=not found)",
+      "retryable": true,
+      "retry_in_seconds": 2.2
+    },
+    {
+      "step": "form",
+      "attempt": 2,
+      "error_type": "ResolveError",
+      "error": "Could not find 'compare.base_branch' (role=not found, label=not found, structure=not found, id_or_class=not found)",
+      "retryable": true,
+      "retry_in_seconds": 4.0
+    },
+    {
+      "step": "form",
+      "attempt": 3,
+      "error_type": "ResolveError",
+      "error": "Could not find 'compare.base_branch' (role=not found, label=not found, structure=not found, id_or_class=not found)",
+      "retryable": true
+    }
+  ],
+  "error": "form failed after 3 attempt(s), retries exhausted: ResolveError: Could not find 'compare.base_branch' (role=not found, label=not found, structure=not found, id_or_class=not found)",
+  "evidence": {
+    "folder": "evidence",
+    "files": [
+      "console.log",
+      "evidence.json",
+      "page.html",
+      "screenshot.png",
+      "url.txt"
+    ],
+    "stage_key": "fill_form",
+    "secret_scan": "clean"
+  },
+  "environment": {
+    "python": "3.12.10",
+    "os": "Windows"
+  }
+}

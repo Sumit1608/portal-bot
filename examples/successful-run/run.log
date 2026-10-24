@@ -1,0 +1,64 @@
+23:21:01 INFO    bot: Run eval-1-fresh started with inputs/example.json
+23:21:01 INFO    bot.session: Session: saved session deleted (--fresh)
+23:21:02 INFO    bot.login: Session: no saved session - doing a full login
+23:21:04 INFO    bot.resolver: Resolver: login.username found by role [role=textbox name='Username or email address']
+23:21:04 INFO    bot.resolver: Resolver: login.password found by label [label='Password']
+23:21:04 INFO    bot.resolver: Resolver: login.submit found by role [role=button name='Sign in']
+23:21:05 INFO    bot.2fa: 2FA: code generated for login (attempt 1) - value not logged
+23:21:05 INFO    bot.resolver: Resolver: 2fa.code found by role [role=textbox name=/authentication code|one-time|verification code/]
+23:21:08 INFO    bot.2fa: 2FA: accepted on attempt 1
+23:21:08 INFO    bot.login: Login: signed in
+23:21:09 INFO    bot.session: Session: saved for the next run
+23:21:10 INFO    bot.compare: Navigate: 1/3 repository page
+23:21:10 INFO    bot.resolver: Resolver: repo.pulls_tab found by role [role=link name=/^\s*Pull requests/]
+23:21:13 INFO    bot.compare: Navigate: 2/3 pull requests
+23:21:13 INFO    bot.resolver: Resolver: pulls.new found by role [role=link name='New pull request']
+23:21:15 INFO    bot.compare: Navigate: 3/3 compare form
+23:21:17 INFO    bot.resolver: Resolver: compare.across_forks found by role [role=button name=/compare across forks/]
+23:21:17 INFO    bot.resolver: Resolver: compare.head_repo found by role [role=button name=/^\s*head repository\s*:/]
+23:21:17 INFO    bot.compare: Form: switched on 'compare across forks' (repository fields visible)
+23:21:17 INFO    bot.resolver: Resolver: compare.head_repo found by role [role=button name=/^\s*head repository\s*:/]
+23:21:17 INFO    bot.resolver: Resolver: compare.base_repo found by role [role=button name=/^\s*base repository\s*:/]
+23:21:18 INFO    bot.resolver: Resolver: compare.picker_filter found by structure [details[open] input[type='text']]
+23:21:18 INFO    bot.resolver: Resolver: compare.repo_option[[REDACTED]/portal-bot] found by structure [details[open] [role^="menuitem"]:has-text("[REDACTED]/portal-bot")]
+23:21:18 INFO    bot.resolver: Resolver: compare.head_repo found by role [role=button name=/^\s*head repository\s*:/]
+23:21:18 INFO    bot.resolver: Resolver: compare.base_repo found by role [role=button name=/^\s*base repository\s*:/]
+23:21:21 INFO    bot.resolver: Resolver: compare.across_forks found by role [role=button name=/compare across forks/]
+23:21:21 INFO    bot.resolver: Resolver: compare.head_repo found by role [role=button name=/^\s*head repository\s*:/]
+23:21:21 INFO    bot.compare: Form: switched on 'compare across forks' (repository fields visible)
+23:21:21 INFO    bot.resolver: Resolver: compare.base_repo found by role [role=button name=/^\s*base repository\s*:/]
+23:21:22 INFO    bot.compare: Form: base repository = [REDACTED]/portal-bot
+23:21:22 INFO    bot.resolver: Resolver: compare.base_branch found by structure [summary:has-text("base:")]
+23:21:22 INFO    bot.resolver: Resolver: compare.picker_filter found by role [role=textbox name=/find a branch|filter|find a repository|search/]
+23:21:22 INFO    bot.resolver: Resolver: compare.branch_option[main] found by role [role=menuitemradio name=/^\s*main(\s|$)/]
+23:21:23 INFO    bot.resolver: Resolver: compare.base_branch found by structure [summary:has-text("base:")]
+23:21:24 INFO    bot.compare: Form: base branch = main (options loaded for base repository [REDACTED]/portal-bot)
+23:21:26 INFO    bot.resolver: Resolver: compare.across_forks found by role [role=button name=/compare across forks/]
+23:21:26 INFO    bot.resolver: Resolver: compare.head_repo found by role [role=button name=/^\s*head repository\s*:/]
+23:21:26 INFO    bot.compare: Form: switched on 'compare across forks' (repository fields visible)
+23:21:26 INFO    bot.resolver: Resolver: compare.head_repo found by role [role=button name=/^\s*head repository\s*:/]
+23:21:27 INFO    bot.resolver: Resolver: compare.picker_filter found by structure [details[open] input[type='text']]
+23:21:27 INFO    bot.resolver: Resolver: compare.repo_option[[REDACTED]/portal-bot] found by structure [details[open] [role^="menuitem"]:has-text("[REDACTED]/portal-bot")]
+23:21:27 INFO    bot.resolver: Resolver: compare.head_repo found by role [role=button name=/^\s*head repository\s*:/]
+23:21:27 INFO    bot.resolver: Resolver: compare.head_repo found by role [role=button name=/^\s*head repository\s*:/]
+23:21:28 INFO    bot.compare: Form: head repository = [REDACTED]/portal-bot
+23:21:28 INFO    bot.resolver: Resolver: compare.head_branch found by structure [summary:has-text("compare:")]
+23:21:28 INFO    bot.resolver: Resolver: compare.picker_filter found by role [role=textbox name=/find a branch|filter|find a repository|search/]
+23:21:29 INFO    bot.resolver: Resolver: compare.branch_option[demo-feature-a] found by role [role=menuitemradio name=/^\s*demo\-feature\-a(\s|$)/]
+23:21:30 INFO    bot.resolver: Resolver: compare.head_branch found by structure [summary:has-text("compare:")]
+23:21:31 INFO    bot.compare: Form: compare branch = demo-feature-a (options loaded for head repository [REDACTED]/portal-bot)
+23:21:33 INFO    bot.resolver: Resolver: compare.across_forks found by role [role=button name=/compare across forks/]
+23:21:33 INFO    bot.resolver: Resolver: compare.head_repo found by role [role=button name=/^\s*head repository\s*:/]
+23:21:33 INFO    bot.compare: Form: switched on 'compare across forks' (repository fields visible)
+23:21:33 INFO    bot.resolver: Resolver: compare.head_repo found by role [role=button name=/^\s*head repository\s*:/]
+23:21:33 INFO    bot.resolver: Resolver: compare.base_repo found by role [role=button name=/^\s*base repository\s*:/]
+23:21:33 INFO    bot.resolver: Resolver: compare.base_branch found by structure [summary:has-text("base:")]
+23:21:33 INFO    bot.resolver: Resolver: compare.head_repo found by role [role=button name=/^\s*head repository\s*:/]
+23:21:33 INFO    bot.resolver: Resolver: compare.head_repo found by role [role=button name=/^\s*head repository\s*:/]
+23:21:33 INFO    bot.resolver: Resolver: compare.head_branch found by structure [summary:has-text("compare:")]
+23:21:33 INFO    bot.compare: Form: all 4 fields set - comparing [REDACTED]/portal-bot:main with [REDACTED]/portal-bot:demo-feature-a
+23:21:43 INFO    bot.documents: Document: printed comparison to documents\feature-a.pdf
+23:21:43 INFO    bot.documents: Document: saved patch from a new tab to documents\feature-a.patch
+23:21:44 INFO    bot: Run SUCCESS in 42.7s - full login (no saved session) - manifest: output\eval-1-fresh\manifest.json
+23:21:44 INFO    bot:   document: documents\feature-a.pdf (179454 bytes, sha256 f007f0ac9c52...)
+23:21:44 INFO    bot:   document: documents\feature-a.patch (579 bytes, sha256 94a08ad8dab6...)

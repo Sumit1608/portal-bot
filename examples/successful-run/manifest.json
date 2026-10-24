@@ -1,0 +1,177 @@
+{
+  "run_id": "eval-1-fresh",
+  "status": "success",
+  "started_at": "2026-10-24T17:51:01+00:00",
+  "finished_at": "2026-10-24T17:51:44+00:00",
+  "total_seconds": 42.696,
+  "input_file": "inputs/example.json",
+  "inputs": {
+    "base_repo": "[REDACTED]/portal-bot",
+    "base_branch": "main",
+    "head_repo": "[REDACTED]/portal-bot",
+    "head_branch": "demo-feature-a",
+    "label": "feature-a"
+  },
+  "session": {
+    "reused": false,
+    "full_login": true,
+    "dead_session_reason": "no saved session"
+  },
+  "pages_visited": [
+    {
+      "url": "https://github.com/login",
+      "title": "Sign in to GitHub \u00b7 GitHub",
+      "stage": "full_login",
+      "at": "2026-10-24T17:51:04+00:00"
+    },
+    {
+      "url": "https://github.com/sessions/two-factor/app",
+      "title": "Two-factor authentication \u00b7 GitHub",
+      "stage": "full_login",
+      "at": "2026-10-24T17:51:05+00:00"
+    },
+    {
+      "url": "https://github.com/",
+      "title": "GitHub",
+      "stage": "full_login",
+      "at": "2026-10-24T17:51:08+00:00"
+    },
+    {
+      "url": "https://github.com/settings/profile",
+      "title": "Your profile",
+      "stage": "session_check",
+      "at": "2026-10-24T17:51:09+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot",
+      "title": "[REDACTED]/portal-bot",
+      "stage": "navigate",
+      "at": "2026-10-24T17:51:10+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/pulls",
+      "title": "Pull requests \u00b7 [REDACTED]/portal-bot",
+      "stage": "navigate",
+      "at": "2026-10-24T17:51:13+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/compare",
+      "title": "Compare \u00b7 [REDACTED]/portal-bot",
+      "stage": "navigate",
+      "at": "2026-10-24T17:51:15+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/compare/[REDACTED]:portal-bot:main...main",
+      "title": "Comparing main...main \u00b7 [REDACTED]/portal-bot",
+      "stage": "fill_form",
+      "at": "2026-10-24T17:51:22+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/compare/[REDACTED]:portal-bot:main...[REDACTED]:portal-bot:demo-feature-a",
+      "title": "Comparing main...demo-feature-a \u00b7 [REDACTED]/portal-bot",
+      "stage": "fill_form",
+      "at": "2026-10-24T17:51:31+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/compare/[REDACTED]:portal-bot:main...[REDACTED]:portal-bot:demo-feature-a",
+      "title": "Comparing main...demo-feature-a \u00b7 [REDACTED]/portal-bot",
+      "stage": "fill_form",
+      "at": "2026-10-24T17:51:33+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/compare/[REDACTED]:portal-bot:main...[REDACTED]:portal-bot:demo-feature-a",
+      "title": "comparison (printed)",
+      "stage": "capture_document",
+      "at": "2026-10-24T17:51:43+00:00"
+    },
+    {
+      "url": "https://github.com/[REDACTED]/portal-bot/compare/[REDACTED]:portal-bot:main...[REDACTED]:portal-bot:demo-feature-a.patch",
+      "title": "comparison as patch (new tab)",
+      "stage": "capture_document",
+      "at": "2026-10-24T17:51:43+00:00"
+    }
+  ],
+  "stages": [
+    {
+      "key": "load_inputs",
+      "status": "ok",
+      "seconds": 0.001
+    },
+    {
+      "key": "launch_browser",
+      "attempt": 1,
+      "status": "ok",
+      "seconds": 0.34
+    },
+    {
+      "key": "session_check",
+      "attempt": 1,
+      "status": "ok",
+      "seconds": 0.0
+    },
+    {
+      "key": "full_login",
+      "attempt": 1,
+      "status": "ok",
+      "seconds": 6.426
+    },
+    {
+      "key": "save_session",
+      "attempt": 1,
+      "status": "ok",
+      "seconds": 0.06
+    },
+    {
+      "key": "navigate",
+      "attempt": 1,
+      "status": "ok",
+      "seconds": 5.765
+    },
+    {
+      "key": "fill_form",
+      "attempt": 1,
+      "status": "ok",
+      "seconds": 18.163
+    },
+    {
+      "key": "capture_document",
+      "attempt": 1,
+      "status": "ok",
+      "seconds": 10.563
+    }
+  ],
+  "captured_files": [
+    {
+      "path": "documents\\feature-a.pdf",
+      "kind": "comparison printed to PDF",
+      "bytes": 179454,
+      "sha256": "f007f0ac9c522d580698be8dad62d4b14eabea298c719b942bfad2da4bf277d8"
+    },
+    {
+      "path": "documents\\feature-a.patch",
+      "kind": "comparison as git patch (new tab)",
+      "bytes": 579,
+      "sha256": "94a08ad8dab68ecb436fe47c2ecf9d049333655a0e7f81ff4bb8e085124aa845"
+    }
+  ],
+  "retries": [],
+  "error": null,
+  "evidence": null,
+  "environment": {
+    "python": "3.12.10",
+    "os": "Windows"
+  },
+  "form": {
+    "fields": {
+      "base_repo": "[REDACTED]/portal-bot",
+      "base_branch": "main",
+      "head_repo": "[REDACTED]/portal-bot",
+      "head_branch": "demo-feature-a"
+    },
+    "result_url": "https://github.com/[REDACTED]/portal-bot/compare/[REDACTED]:portal-bot:main...[REDACTED]:portal-bot:demo-feature-a"
+  },
+  "document": {
+    "source_url": "https://github.com/[REDACTED]/portal-bot/compare/[REDACTED]:portal-bot:main...[REDACTED]:portal-bot:demo-feature-a",
+    "comparison": "diff"
+  }
+}

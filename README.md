@@ -1,9 +1,24 @@
 # portal-bot
 
-Browser automation for GitHub (own account only). It logs in with an
-authenticator-app second factor, reuses the session on later runs, navigates
-to GitHub's **Compare changes** form, and saves the document GitHub produces.
-*Work in progress, built step by step.*
+A single-process Playwright command-line program that signs in to **GitHub**
+(my own account, my own public repository) with an **authenticator-app second
+factor**, reuses the session on later runs, clicks three pages deep to the
+**Compare changes** form, fills its four fields (two of them dependent), and
+saves the comparison GitHub produces as a **PDF (print)** and a **.patch
+(new tab)**, with a JSON manifest of the run.
+
+One site covers every requirement, so no second site is used.
+
+| Deliverable | Where |
+|---|---|
+| One-command setup | `python bootstrap.py` ([Quick start](#quick-start)) |
+| One successful run output | [`examples/successful-run/`](examples/successful-run/) |
+| One failure bundle | [`examples/failure-bundle/`](examples/failure-bundle/) |
+| All six evaluation scenarios, one command | `python evaluate.py` ([Evaluation](#evaluation)) |
+| Required answers | [Design notes](#design-notes) |
+
+**Safety:** it uses only the owner's account and data. It never bypasses a
+CAPTCHA, and secrets live only in `.env` (ignored by Git).
 
 ## Quick start
 
@@ -35,6 +50,7 @@ python run.py --input inputs/example.json
 | `--headless` | Run without a visible browser window |
 | `--capture-fixtures` | Full login that also saves cleaned copies of the login, 2FA and compare pages to `fixtures/` |
 | `--break-step STEP` | Make `navigate`, `fill_form` or `capture_document` fail on purpose, to see retries and the evidence bundle |
+| `--run-id NAME` | Name of the output folder (default: date-time-label) |
 
 ## Environment variables (`.env`)
 
@@ -67,7 +83,52 @@ Each run writes to `output/<run-id>/`:
 - `documents/<label>.pdf`: the comparison page printed to PDF
 - `documents/<label>.patch`: the same comparison as a git patch, opened in a new tab
 - `manifest.json`: inputs, pages visited, stage timings, form values, captured files (size and SHA-256)
-- `run.log`: the run's log, with the password, 2FA secret and every 2FA code masked as `[REDACTED]`
+- `run.log`: the run's log, with the password, 2FA secret, every 2FA code and the username masked as `[REDACTED]`
+- `evidence/`: only on a final failure (see [Evidence bundle](#evidence-bundle-on-final-failure))
+
+Exit code: `0` success, `1` run failed, `2` bad input file or missing `.env` values.
+
+## Project layout
+
+| Path | Purpose |
+|---|---|
+| `run.py` | The command: login → navigate → fill form → capture documents |
+| `evaluate.py` | Runs the six evaluation scenarios |
+| `bootstrap.py` | One-command setup |
+| `bot/code_provider.py` | `get_code(challenge)`: TOTP codes, one retry on a wrong code |
+| `bot/github_login.py`, `bot/session.py` | Login, session save and reuse, dead-session probe |
+| `bot/resolver.py`, `bot/targets.py` | Multi-strategy locator resolver and every element's description |
+| `bot/compare_flow.py` | Navigation and the dependent Compare form |
+| `bot/documents.py` | Print to PDF and the `.patch` in a new tab |
+| `bot/retry.py`, `bot/evidence.py` | Retries with backoff; the redacted evidence bundle |
+| `bot/redact.py`, `bot/secrets_scan.py`, `bot/fixtures.py` | Redaction, leak scanning, cleaned page copies |
+| `fixtures/` | Cleaned copies of GitHub's login, 2FA and compare pages (offline resolver check) |
+| `inputs/` | Input files |
+| `examples/` | One successful run and one failure bundle |
+| `tests/` | Offline tests |
+
+## Evaluation
+
+```bash
+python evaluate.py              # all six scenarios (needs .env)
+python evaluate.py --offline    # scenario 5 only, no account or internet needed
+python evaluate.py --only 3     # one scenario
+```
+
+Each scenario runs the real command as a separate process, then checks the
+manifest and files. The table at the end shows PASS/FAIL. Full logs and
+`report.md` go to `output/evaluation/`.
+
+| # | Scenario | Command it runs | What is checked |
+|---|---|---|---|
+| 1 | No saved state | `run.py --input inputs/example.json --fresh` | Full login via the TOTP provider, PDF and patch on disk, manifest complete |
+| 2 | Run again | `run.py --input inputs/example.json` | Session reused (no login page), **identical SHA-256** for both documents, faster than 1 |
+| 3 | Corrupt the saved state | `scripts/corrupt_session.py` (and `--garble`), then `run.py` | Dead session detected (reason recorded), full login, success |
+| 4 | Change the input JSON | `run.py --input inputs/example2.json` | Different inputs, both document hashes differ, no code change |
+| 5 | Mutated HTML, offline | `scripts/resolver_offline.py` | Every field found after renamed classes, reordered siblings, wrapper divs, iframe, all combined |
+| 6 | Break a step | `run.py ... --break-step fill_form` | Retries with backoff, evidence bundle with all five files, secret scan clean |
+
+To publish fresh examples after an evaluation: `python scripts/make_examples.py`.
 
 ## Offline tests
 
@@ -287,6 +348,31 @@ in `python -m pytest`.
 
 To refresh the saved pages from the live site:
 `python run.py --input inputs/example.json --capture-fixtures`
+
+### What I would change first for a hundred portals
+
+**First: split the engine from the portal.** Today the GitHub-specific parts
+(targets, the login flow, the Compare form, the document step) live beside the
+reusable engine. For a hundred portals I would define a small `Portal`
+interface (`login`, `navigate`, `fill`, `capture`) and move each portal's
+**targets into a data file** (YAML/JSON) rather than Python. Adding a portal
+then becomes mostly configuration plus a thin adapter, and the resolver,
+retries, evidence, manifest, session store and code providers are shared
+untouched. Everything below builds on that split.
+
+Then, in order:
+1. **Drift detection.** Run each portal's offline fixture check in CI, plus a
+   nightly canary run against the live site. Alert when an element's winning
+   strategy degrades (for example from `role` to `id_or_class`); that's an
+   early sign of a redesign, before anything breaks.
+2. **More code providers** behind the same `get_code()`: IMAP polling and an
+   SMS-forwarding inbox. Secrets move from `.env` to a vault, per account.
+3. **Shared session store:** encrypted, keyed by portal and account, with locking
+   so two workers never log in to the same account at once.
+4. **Job queue and worker pool:** per-portal concurrency and rate limits, a
+   browser pool, and the retry policy configurable per portal.
+5. **Central evidence and metrics:** bundles uploaded to storage, plus
+   success rate, duration per stage, and retry counts per portal.
 
 ## Troubleshooting
 

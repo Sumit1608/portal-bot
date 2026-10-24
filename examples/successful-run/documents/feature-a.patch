@@ -1,0 +1,22 @@
+From 47096bc14696c3e2f4c63c922d8ba1b0aa0c3a9a Mon Sep 17 00:00:00 2001
+From: sumit1608 <69622537+Sumit1608@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 21:24:50 +0530
+Subject: [PATCH] Demo change for demo-feature-a
+
+---
+ demo/feature-a.md | 6 ++++++
+ 1 file changed, 6 insertions(+)
+ create mode 100644 demo/feature-a.md
+
+diff --git a/demo/feature-a.md b/demo/feature-a.md
+new file mode 100644
+index 0000000..26d4dd2
+--- /dev/null
++++ b/demo/feature-a.md
+@@ -0,0 +1,6 @@
++# Feature A
++
++Demo change used by inputs/example.json.
++
++- adds a short list
++- touches one new file

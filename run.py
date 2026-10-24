@@ -13,6 +13,8 @@ a final failure a redacted evidence bundle is written.
 import argparse
 import asyncio
 import os
+import re
+import shutil
 import sys
 import time
 from datetime import datetime
@@ -46,7 +48,11 @@ def parse_args() -> argparse.Namespace:
                    help="save cleaned copies of the login, 2FA and compare pages to fixtures/ (implies --fresh)")
     p.add_argument("--break-step", choices=faults.STEPS,
                    help="make this step fail on purpose, to see retries and the evidence bundle")
-    return p.parse_args()
+    p.add_argument("--run-id", help="name of the output folder (default: date-time-label)")
+    args = p.parse_args()
+    if args.run_id and not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", args.run_id):
+        p.error("--run-id may only contain letters, digits, '.', '_' and '-'")
+    return args
 
 
 async def main() -> int:
@@ -71,8 +77,10 @@ async def main() -> int:
     for value in (password, os.getenv("GITHUB_TOTP_SECRET"), *identifiers):
         REDACTOR.add(value)                      # never let these reach a log or evidence
 
-    run_id = f"{datetime.now():%Y%m%d-%H%M%S}-{inputs.label}"
+    run_id = args.run_id or f"{datetime.now():%Y%m%d-%H%M%S}-{inputs.label}"
     out_dir = ROOT / "output" / run_id
+    if args.run_id and out_dir.exists():
+        shutil.rmtree(out_dir)                 # a named run replaces its previous output
     manifest = Manifest(run_id, args.input, inputs.to_dict(), out_dir)
     manifest.record_stage("load_inputs", load_seconds)
     log = setup_logging(out_dir / "run.log")
@@ -131,11 +139,13 @@ async def main() -> int:
     how = ("reused saved session" if s["reused"] else
            f"full login ({s['dead_session_reason']})" if s["full_login"] else "no session")
     if error:
-        log.error("Run FAILED in %.1fs - %s", manifest.data["total_seconds"], error)
+        log.error("Run FAILED in %.1fs - %s - %s", manifest.data["total_seconds"], how, error)
         if manifest.data["evidence"]:
             log.error("Evidence bundle: %s", (out_dir / "evidence").relative_to(ROOT))
-    log.info("Run %s in %.1fs - %s - manifest: %s",
-             status.upper(), manifest.data["total_seconds"], how, path.relative_to(ROOT))
+        log.info("Manifest: %s", path.relative_to(ROOT))
+    else:
+        log.info("Run SUCCESS in %.1fs - %s - manifest: %s",
+                 manifest.data["total_seconds"], how, path.relative_to(ROOT))
     for f in manifest.data["captured_files"]:
         log.info("  document: %s (%d bytes, sha256 %s...)", f["path"], f["bytes"], f["sha256"][:12])
     return 0 if status == "success" else 1
