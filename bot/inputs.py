@@ -38,7 +38,7 @@ def load_inputs(path: str | Path) -> RunInputs:
     if not p.is_file():
         raise InputError(f"Input file not found: {p}")
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8-sig"))   # -sig: Windows tools often add a BOM
     except json.JSONDecodeError as e:
         raise InputError(f"{p} is not valid JSON (line {e.lineno}): {e.msg}") from None
     if not isinstance(data, dict):

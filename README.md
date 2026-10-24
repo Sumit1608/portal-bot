@@ -88,6 +88,38 @@ Each run writes to `output/<run-id>/`:
 
 Exit code: `0` success, `1` run failed, `2` bad input file or missing `.env` values.
 
+## Job queue
+
+To run many inputs without starting each one by hand, put them in a queue and
+let a worker run them one after another:
+
+```bash
+python jobs.py add inputs/example.json inputs/example2.json   # check each file and queue it
+python jobs.py work                                           # run every queued job, then stop
+python jobs.py list                                           # status and output folder of every job
+```
+
+| Option | Effect |
+|---|---|
+| `add ... --break-step STEP` | Queue a job in test mode (see `run.py --break-step`) |
+| `work --once` | Run at most one job |
+| `work --watch` | Keep waiting for new jobs after the queue is empty (Ctrl+C to stop) |
+| `work --visible` | Show the browser window (jobs run headless by default) |
+
+How it works:
+- A bad input file is turned away by `add` and never queued.
+- Each job runs the normal `run.py` as its own process, so it gets the same
+  session reuse, retries, evidence bundle and manifest. Its output goes to
+  `output/job-<id>/` and its console log to `jobs/logs/<id>.log`.
+- Jobs are files in `jobs/pending/`, `running/`, `done/` and `failed/`. A job
+  changes state by an atomic file rename, so it is never in two states at once.
+  The input file is copied when the job is added, so later edits don't change it.
+- Only **one worker** runs at a time, because all jobs share one saved GitHub
+  session. A second `work` refuses to start. If a worker is stopped or crashes,
+  the next worker puts the interrupted job back in the queue and runs it again.
+- A job that takes over 15 minutes is stopped and marked failed.
+- `jobs/` is ignored by Git.
+
 ## Project layout
 
 | Path | Purpose |
@@ -95,6 +127,7 @@ Exit code: `0` success, `1` run failed, `2` bad input file or missing `.env` val
 | `run.py` | The command: login → navigate → fill form → capture documents |
 | `evaluate.py` | Runs the six evaluation scenarios |
 | `bootstrap.py` | One-command setup |
+| `jobs.py`, `bot/jobs.py` | Job queue and worker in front of `run.py` |
 | `bot/code_provider.py` | `get_code(challenge)`: TOTP codes, one retry on a wrong code |
 | `bot/github_login.py`, `bot/session.py` | Login, session save and reuse, dead-session probe |
 | `bot/resolver.py`, `bot/targets.py` | Multi-strategy locator resolver and every element's description |
