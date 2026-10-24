@@ -1,0 +1,15 @@
+# Secrets - NEVER commit these
+.env
+
+# Saved login session (contains cookies = access to your account)
+state/
+
+# Run outputs
+output/
+evidence/
+
+# Python / editor junk
+.venv/
+__pycache__/
+*.pyc
+.DS_Store

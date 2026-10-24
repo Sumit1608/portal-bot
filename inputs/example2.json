@@ -1,0 +1,7 @@
+{
+  "base_repo": "Sumit1608/portal-bot",
+  "base_branch": "main",
+  "head_repo": "Sumit1608/portal-bot",
+  "head_branch": "demo-feature-b",
+  "label": "feature-b"
+}
