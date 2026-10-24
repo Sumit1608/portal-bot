@@ -174,12 +174,22 @@ and read their results. It uses only Python's standard library.
 
 | Request | Answer |
 |---|---|
+| `GET /` | The web UI (no token needed to load the page) |
 | `GET /health` | `{"ok": true}` (no token needed) |
 | `POST /jobs` with an input JSON as the body | `201` and the new job (`id`, `status: "pending"`, ...). Bad input: `400` with the reason. An optional `"break_step"` field queues a test-mode job |
 | `GET /jobs` | Every job, the count per state, and whether the worker is running |
 | `GET /jobs/<id>` | One job: `status` (`pending`, `running`, `done`, `failed`), `exit_code`, `error`, `output_dir` |
 
-Every request except `/health` needs the header `Authorization: Bearer <API_TOKEN>`,
+**Web UI.** With the API running, open http://127.0.0.1:8000/ in a browser.
+Paste your `API_TOKEN` and click **Connect**. You'll see the worker status,
+the number of jobs in each state, a form to queue a comparison, and the job list,
+which refreshes every 3 seconds. The page holds no data itself. It calls the
+same API with your token, which is kept only in that browser tab (sessionStorage)
+and is gone when you close it. A strict Content-Security-Policy lets the page load
+only its own files and talk only to this API, and job data is always shown as
+plain text, never as HTML. The UI files are in `bot/ui/`.
+
+Every request except `/health` and the UI's own files needs the header `Authorization: Bearer <API_TOKEN>`,
 or it gets `401`. Example: queue `inputs/example.json`, then check the job.
 
 Mac / Linux:
@@ -218,6 +228,7 @@ Safety:
 | `bootstrap.py` | One-command setup |
 | `jobs.py`, `bot/jobs.py` | Job queue and worker in front of `run.py` |
 | `api.py`, `bot/api.py` | HTTP API in front of the job queue |
+| `bot/ui/` | The small web UI served by the API |
 | `bot/code_provider.py` | `get_code(challenge)`: TOTP codes, one retry on a wrong code |
 | `bot/github_login.py`, `bot/session.py` | Login, session save and reuse, dead-session probe |
 | `bot/resolver.py`, `bot/targets.py` | Multi-strategy locator resolver and every element's description |

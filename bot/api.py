@@ -1,5 +1,6 @@
 """A small HTTP API in front of the job queue (Python standard library only).
 
+    GET  /                the small web UI (bot/ui/)          no token needed (holds no data)
     GET  /health          {"ok": true}                       no token needed
     POST /jobs            body: input JSON (+ optional "break_step") -> 201 and the job
     GET  /jobs            {"jobs": [...]} every job, oldest first
@@ -13,6 +14,7 @@ import hmac
 import json
 import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Callable
 
 from .inputs import InputError
@@ -21,6 +23,18 @@ from .jobs import JobQueue
 MAX_BODY = 64 * 1024                 # an input file is a few hundred bytes
 MAX_DISCARD = 1024 * 1024            # an oversized body is read and dropped up to this much
 log = logging.getLogger("bot.api")
+
+# The small web UI (bot/ui/): open http://127.0.0.1:8000/ in a browser.
+UI_DIR = Path(__file__).resolve().parent / "ui"
+UI_FILES = {                                     # fixed list: no path from the request reaches the disk
+    "": ("index.html", "text/html; charset=utf-8"),
+    "/ui": ("index.html", "text/html; charset=utf-8"),
+    "/ui.js": ("ui.js", "text/javascript; charset=utf-8"),
+    "/ui.css": ("ui.css", "text/css; charset=utf-8"),
+}
+# only this API's own files and calls; no inline code, no other sites, no framing
+UI_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+          "img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 
 
 class ApiServer(ThreadingHTTPServer):
@@ -46,6 +60,12 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0].rstrip("/")
         if path == "/health":
             return self._send(200, {"ok": True})
+        if path in UI_FILES:                     # the page holds no data; its API calls need the token
+            return self._send_file(*UI_FILES[path])
+        if path == "/favicon.ico":               # browsers ask for it on their own: no icon, no 401 noise
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            return self.end_headers()
         if not self._authorized():
             return
         q = self.server.queue
@@ -126,6 +146,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Location", location)
         for name, value in (extra or {}).items():
             self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_file(self, name: str, content_type: str) -> None:
+        body = (UI_DIR / name).read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Security-Policy", UI_CSP)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
         self.wfile.write(body)
 
