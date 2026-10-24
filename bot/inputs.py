@@ -41,8 +41,13 @@ def load_inputs(path: str | Path) -> RunInputs:
         data = json.loads(p.read_text(encoding="utf-8-sig"))   # -sig: Windows tools often add a BOM
     except json.JSONDecodeError as e:
         raise InputError(f"{p} is not valid JSON (line {e.lineno}): {e.msg}") from None
+    return parse_inputs(data, str(p))
+
+
+def parse_inputs(data: object, source: str = "input") -> RunInputs:
+    """Validate already-parsed JSON (a file's content or an API request body)."""
     if not isinstance(data, dict):
-        raise InputError(f"{p} must contain a JSON object {{ ... }}")
+        raise InputError(f"{source} must contain a JSON object {{ ... }}")
 
     def text(key: str, default: str = "") -> str:
         value = data.get(key, default)

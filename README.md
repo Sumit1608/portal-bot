@@ -61,6 +61,7 @@ python run.py --input inputs/example.json
 | `GITHUB_TOTP_SECRET` | yes | The 2FA "setup key" shown when enabling authenticator-app 2FA |
 | `REDACT_EXTRA` | no | Extra words to mask in logs and saved pages, comma-separated (e.g. your display name, email) |
 | `MAX_ATTEMPTS` | no | Attempts per step for retryable failures (default 3) |
+| `API_TOKEN` | only for `api.py` | Password for HTTP API requests, at least 16 characters ([HTTP API](#http-api)) |
 
 `.env` is ignored by Git and never committed.
 
@@ -120,6 +121,57 @@ How it works:
 - A job that takes over 15 minutes is stopped and marked failed.
 - `jobs/` is ignored by Git.
 
+## HTTP API
+
+A small web API in front of the job queue, so another program can submit jobs
+and read their results. It uses only Python's standard library.
+
+1. Create a token once and add it to `.env` as `API_TOKEN=<value>`:
+   ```bash
+   python -c "import secrets; print(secrets.token_urlsafe(24))"
+   ```
+2. Start the API with a built-in worker (Ctrl+C to stop):
+   ```bash
+   python api.py --worker
+   ```
+   It prints `API listening on http://127.0.0.1:8000  (worker: on)`.
+
+| Request | Answer |
+|---|---|
+| `GET /health` | `{"ok": true}` (no token needed) |
+| `POST /jobs` with an input JSON as the body | `201` and the new job (`id`, `status: "pending"`, ...). Bad input: `400` with the reason. An optional `"break_step"` field queues a test-mode job |
+| `GET /jobs` | Every job, the count per state, and whether the worker is running |
+| `GET /jobs/<id>` | One job: `status` (`pending`, `running`, `done`, `failed`), `exit_code`, `error`, `output_dir` |
+
+Every request except `/health` needs the header `Authorization: Bearer <API_TOKEN>`,
+or it gets `401`. Example: queue `inputs/example.json`, then check the job.
+
+Mac / Linux:
+```bash
+curl -X POST http://127.0.0.1:8000/jobs -H "Authorization: Bearer <your API_TOKEN>" --data @inputs/example.json
+curl http://127.0.0.1:8000/jobs/<id> -H "Authorization: Bearer <your API_TOKEN>"
+```
+
+Windows (PowerShell):
+```powershell
+$h = @{ Authorization = "Bearer <your API_TOKEN>" }
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/jobs -Headers $h -InFile inputs/example.json -ContentType application/json
+Invoke-RestMethod http://127.0.0.1:8000/jobs/<id> -Headers $h
+```
+
+| Option | Effect |
+|---|---|
+| `--worker` | Also run the queued jobs in this process. Without it the API only queues them; run `python jobs.py work --watch` beside it |
+| `--visible` | Show the browser window for jobs (with `--worker`) |
+| `--port N` | Port to listen on (default 8000) |
+| `--host ADDR` | Address to listen on. The default `127.0.0.1` means only this computer can reach it. Any other value prints a warning |
+
+Safety:
+- The API won't start without a token of at least 16 characters, and the token is compared in constant time.
+- It never writes the token to its log (`output/api.log`). The log records only the method, path and status of each request.
+- Bodies over 64 KB are refused, and a job id in a path must be a plain id.
+- The API exposes only job records. It never exposes `.env`, `state/` or the logs.
+
 ## Project layout
 
 | Path | Purpose |
@@ -128,6 +180,7 @@ How it works:
 | `evaluate.py` | Runs the six evaluation scenarios |
 | `bootstrap.py` | One-command setup |
 | `jobs.py`, `bot/jobs.py` | Job queue and worker in front of `run.py` |
+| `api.py`, `bot/api.py` | HTTP API in front of the job queue |
 | `bot/code_provider.py` | `get_code(challenge)`: TOTP codes, one retry on a wrong code |
 | `bot/github_login.py`, `bot/session.py` | Login, session save and reuse, dead-session probe |
 | `bot/resolver.py`, `bot/targets.py` | Multi-strategy locator resolver and every element's description |

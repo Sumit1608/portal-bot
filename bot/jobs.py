@@ -15,17 +15,21 @@ left in running/ by a crashed worker back into pending/.
 """
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from .inputs import load_inputs
+from . import faults
+from .inputs import InputError, RunInputs, load_inputs, parse_inputs
 
 STATES = ("pending", "running", "done", "failed")
+JOB_ID = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
 JOB_TIMEOUT = 15 * 60            # seconds; a run normally takes under a minute
 
 
@@ -58,16 +62,27 @@ class JobQueue:
     def add(self, input_file: str | Path, break_step: str | None = None) -> Job:
         """Validate the input file now (bad input never enters the queue)."""
         inputs = load_inputs(input_file)                 # raises InputError
+        return self._add(inputs, Path(input_file).read_text(encoding="utf-8-sig"),
+                         str(input_file), break_step)
+
+    def add_data(self, data: object, break_step: str | None = None, source: str = "api") -> Job:
+        """Same as add(), for input that arrived as JSON (e.g. an API request)."""
+        inputs = parse_inputs(data, "request body")    # raises InputError
+        return self._add(inputs, json.dumps(data, indent=2), source, break_step)
+
+    def _add(self, inputs: RunInputs, raw: str, source: str, break_step: str | None) -> Job:
+        if break_step is not None and break_step not in faults.STEPS:
+            raise InputError(f'"break_step" must be one of {", ".join(faults.STEPS)}')
         job_id = f"{datetime.now():%Y%m%d-%H%M%S-%f}-{inputs.label}-{secrets.token_hex(2)}"
         frozen = self.root / "inputs" / f"{job_id}.json"
-        frozen.write_text(Path(input_file).read_text(encoding="utf-8-sig"), encoding="utf-8")
+        frozen.write_text(raw, encoding="utf-8")
         data = {
             "id": job_id,
             "status": "pending",
             "created_at": _now(),
             "started_at": None,
             "finished_at": None,
-            "input_file": str(input_file),
+            "input_file": source,
             "inputs": inputs.to_dict(),
             "break_step": break_step,
             "exit_code": None,
@@ -139,8 +154,25 @@ class JobQueue:
         jobs = []
         for state in STATES:
             for path in (self.root / state).glob("*.json"):
-                jobs.append(json.loads(path.read_text(encoding="utf-8")))
+                try:
+                    jobs.append(json.loads(path.read_text(encoding="utf-8")))
+                except FileNotFoundError:
+                    pass                           # moved to its next state meanwhile
         return sorted(jobs, key=lambda j: j["id"])
+
+    def get(self, job_id: str) -> dict | None:
+        if not JOB_ID.match(job_id):
+            return None
+        for _ in range(2):                         # a second look if it moved while we searched
+            for state in STATES:
+                try:
+                    return json.loads((self.root / state / f"{job_id}.json").read_text(encoding="utf-8"))
+                except FileNotFoundError:
+                    continue
+        return None
+
+    def counts(self) -> dict[str, int]:
+        return {state: len(list((self.root / state).glob("*.json"))) for state in STATES}
 
     def input_path(self, job: Job) -> Path:
         return self.root / "inputs" / f"{job.id}.json"
@@ -197,3 +229,36 @@ def run_job(queue: JobQueue, job: Job, output_root: Path, headless: bool = True,
     if exit_code == 2 and not manifest and not error:
         error = "run.py refused to start (bad input or missing .env values), see the job log"
     queue.finish(job, exit_code, manifest, error)
+
+
+def work_loop(queue: JobQueue, output_root: Path, headless: bool = True, once: bool = False,
+              watch: bool = False, stop: threading.Event | None = None,
+              say: Callable[[str], None] = print, poll_seconds: float = 5,
+              runner: Runner = subprocess_runner) -> tuple[int, int]:
+    """Run queued jobs one after another; returns (done, failed).
+
+    The caller must hold the worker lock. Stops when the queue is empty,
+    unless watch=True, then it waits for new jobs until `stop` is set.
+    """
+    stop = stop or threading.Event()
+    for job_id in queue.recover():
+        say(f"recovered {job_id} (left running by a stopped worker) - it will run again")
+    done = failed = 0
+    while not stop.is_set():
+        job = queue.claim()
+        if job is None:
+            if watch and not once:
+                stop.wait(poll_seconds)
+                continue
+            break
+        say(f"running {job.id} ...")
+        run_job(queue, job, output_root, headless=headless, runner=runner)
+        if job.data["status"] == "done":
+            done += 1
+            say(f"  done    -> {job.data['output_dir']}")
+        else:
+            failed += 1
+            say(f"  FAILED  -> {job.data['error']}  (log: jobs/logs/{job.id}.log)")
+        if once:
+            break
+    return done, failed

@@ -4,7 +4,7 @@ import json
 import pytest
 
 from bot.inputs import InputError
-from bot.jobs import JobQueue, WorkerBusy, run_job
+from bot.jobs import JobQueue, WorkerBusy, run_job, work_loop
 
 INPUT = {"base_repo": "owner/repo", "base_branch": "main", "head_branch": "feature", "label": "f"}
 
@@ -82,6 +82,16 @@ def test_failed_job_keeps_the_error(tmp_path):
     run_job(q, job, out, runner=fake_runner(out, exit_code=1, status="failed"))
     [saved] = q.list()
     assert saved["status"] == "failed" and saved["error"] == "boom"
+
+
+def test_work_loop_drains_the_queue(tmp_path):
+    q, out = JobQueue(tmp_path / "jobs"), tmp_path / "output"
+    for name in ("a", "b"):
+        q.add(input_file(tmp_path, f"{name}.json", label=name))
+    lines = []
+    assert work_loop(q, out, runner=fake_runner(out), say=lines.append) == (2, 0)
+    assert q.counts() == {"pending": 0, "running": 0, "done": 2, "failed": 0}
+    assert sum(line.startswith("running") for line in lines) == 2
 
 
 def test_crashed_worker_jobs_are_recovered(tmp_path):

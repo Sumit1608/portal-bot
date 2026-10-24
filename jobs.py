@@ -11,16 +11,14 @@ to stop). `list` shows every job and its result. Jobs live in jobs/.
 """
 import argparse
 import sys
-import time
 from pathlib import Path
 
 from bot import faults
 from bot.inputs import InputError
-from bot.jobs import JobQueue, WorkerBusy, run_job
+from bot.jobs import JobQueue, WorkerBusy, work_loop
 
 ROOT = Path(__file__).resolve().parent
 QUEUE_DIR = ROOT / "jobs"
-POLL_SECONDS = 5
 
 
 def cmd_add(queue: JobQueue, args) -> int:
@@ -57,26 +55,9 @@ def cmd_work(queue: JobQueue, args) -> int:
         print(f"Not started: {e}")
         return 1
     try:
-        for job_id in queue.recover():
-            print(f"recovered {job_id} (left running by a stopped worker) - it will run again")
-        done = failed = 0
-        while True:
-            job = queue.claim()
-            if job is None:
-                if args.watch and not args.once:
-                    time.sleep(POLL_SECONDS)
-                    continue
-                break
-            print(f"running {job.id} ...", flush=True)
-            run_job(queue, job, ROOT / "output", headless=not args.visible)
-            if job.data["status"] == "done":
-                done += 1
-                print(f"  done    -> {job.data['output_dir']}")
-            else:
-                failed += 1
-                print(f"  FAILED  -> {job.data['error']}  (log: jobs/logs/{job.id}.log)")
-            if args.once:
-                break
+        done, failed = work_loop(queue, ROOT / "output", headless=not args.visible,
+                                 once=args.once, watch=args.watch,
+                                 say=lambda line: print(line, flush=True))
         print(f"Worker finished: {done} done, {failed} failed.")
         return 0 if failed == 0 else 1
     except KeyboardInterrupt:
