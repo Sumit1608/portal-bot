@@ -189,7 +189,7 @@ class GitHubAuth:
             log.info("2FA: GitHub offered another method - switching to the authenticator app")
             await page.goto(TOTP_URL, wait_until="domcontentloaded")
             await self._record(page, "full_login")
-        provider = provider_from_env(clock_offset=clock_offset)
+        provider = provider_from_env(clock_offset=clock_offset, window_file=self.store.totp_window_file)
 
         captured = False
 

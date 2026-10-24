@@ -1,10 +1,12 @@
 """Offline tests for the job queue: order, states, recovery, the worker lock."""
 import json
+import threading
+import time
 
 import pytest
 
 from bot.inputs import InputError
-from bot.jobs import JobQueue, WorkerBusy, run_job, work_loop
+from bot.jobs import MAX_PARALLEL, JobQueue, WorkerBusy, run_job, work_loop
 
 INPUT = {"base_repo": "owner/repo", "base_branch": "main", "head_branch": "feature", "label": "f"}
 
@@ -92,6 +94,50 @@ def test_work_loop_drains_the_queue(tmp_path):
     assert work_loop(q, out, runner=fake_runner(out), say=lines.append) == (2, 0)
     assert q.counts() == {"pending": 0, "running": 0, "done": 2, "failed": 0}
     assert sum(line.startswith("running") for line in lines) == 2
+
+
+def test_parallel_slots_run_jobs_at_the_same_time(tmp_path):
+    q, out = JobQueue(tmp_path / "jobs"), tmp_path / "output"
+    for name in "abcde":
+        q.add(input_file(tmp_path, f"{name}.json", label=name))
+    inner = fake_runner(out)
+    lock, running, peak = threading.Lock(), [0], [0]
+
+    def slow_runner(args, log_file):
+        with lock:
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+        time.sleep(0.2)
+        with lock:
+            running[0] -= 1
+        return inner(args, log_file)
+
+    stop_reading, read_errors = threading.Event(), []
+
+    def api_like_reader():                                     # reads while jobs change state
+        while not stop_reading.is_set():
+            try:
+                q.list()
+            except Exception as e:
+                read_errors.append(e)
+
+    reader = threading.Thread(target=api_like_reader)
+    reader.start()
+    try:
+        assert work_loop(q, out, runner=slow_runner, say=lambda line: None, parallel=2) == (5, 0)
+    finally:
+        stop_reading.set()
+        reader.join()
+    assert read_errors == []
+    assert peak[0] == 2                                        # two at once, never more
+    run_ids = [a[a.index("--run-id") + 1] for a in inner.calls]
+    assert len(run_ids) == len(set(run_ids)) == 5             # every job ran exactly once
+
+
+@pytest.mark.parametrize("n", [0, MAX_PARALLEL + 1])
+def test_parallel_is_bounded(tmp_path, n):
+    with pytest.raises(ValueError):
+        work_loop(JobQueue(tmp_path / "jobs"), tmp_path / "output", parallel=n)
 
 
 def test_crashed_worker_jobs_are_recovered(tmp_path):

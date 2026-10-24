@@ -2,10 +2,11 @@
 
     python jobs.py add inputs/example.json [inputs/example2.json ...] [--break-step STEP]
     python jobs.py list
-    python jobs.py work [--once] [--watch] [--visible]
+    python jobs.py work [--parallel N] [--once] [--watch] [--visible]
 
 `add` checks each input file and puts it in the queue. `work` runs the queued
-jobs one after another through run.py (headless unless --visible) and stops
+jobs through run.py (headless unless --visible), one after another or up to N
+at the same time with --parallel N, and stops
 when the queue is empty; with --watch it keeps waiting for new jobs (Ctrl+C
 to stop). `list` shows every job and its result. Jobs live in jobs/.
 """
@@ -15,7 +16,7 @@ from pathlib import Path
 
 from bot import faults
 from bot.inputs import InputError
-from bot.jobs import JobQueue, WorkerBusy, work_loop
+from bot.jobs import MAX_PARALLEL, JobQueue, WorkerBusy, parallel_count, work_loop
 
 ROOT = Path(__file__).resolve().parent
 QUEUE_DIR = ROOT / "jobs"
@@ -56,7 +57,7 @@ def cmd_work(queue: JobQueue, args) -> int:
         return 1
     try:
         done, failed = work_loop(queue, ROOT / "output", headless=not args.visible,
-                                 once=args.once, watch=args.watch,
+                                 once=args.once, watch=args.watch, parallel=args.parallel,
                                  say=lambda line: print(line, flush=True))
         print(f"Worker finished: {done} done, {failed} failed.")
         return 0 if failed == 0 else 1
@@ -75,7 +76,9 @@ def main() -> int:
     a.add_argument("--break-step", choices=faults.STEPS, help="test mode: make this step fail")
     sub.add_parser("list", help="show all jobs")
     w = sub.add_parser("work", help="run queued jobs")
-    w.add_argument("--once", action="store_true", help="run at most one job")
+    w.add_argument("--once", action="store_true", help="run at most one job (one per slot with --parallel)")
+    w.add_argument("--parallel", type=parallel_count, default=1, metavar="N",
+                   help=f"run up to N jobs at the same time (1-{MAX_PARALLEL}, default 1)")
     w.add_argument("--watch", action="store_true", help="keep waiting for new jobs")
     w.add_argument("--visible", action="store_true", help="show the browser window")
     args = p.parse_args()

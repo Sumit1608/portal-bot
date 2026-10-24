@@ -13,6 +13,7 @@ same 6-digit code as the phone app, from the current time - no human needed.
 Rules:
   * never log or print the code (each code is registered with the redactor)
   * never hand out the same code twice - a retry waits for the next 30s window
+    (shared between processes through a small file when jobs run in parallel)
   * don't hand out a code that expires in under 3 seconds
   * answer_challenge() retries a rejected code exactly once, then gives up
 """
@@ -21,6 +22,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Awaitable, Callable, Protocol
 
 import pyotp
@@ -55,7 +57,8 @@ class TotpCodeProvider:
     STEP_SECONDS = 30
     MIN_SECONDS_LEFT = 3
 
-    def __init__(self, secret: str | None, *, clock=time.time, sleep=asyncio.sleep):
+    def __init__(self, secret: str | None, *, clock=time.time, sleep=asyncio.sleep,
+                 window_file: Path | None = None):
         try:
             clean = normalize_totp_secret(secret)
         except SecretError as e:
@@ -66,7 +69,24 @@ class TotpCodeProvider:
         self._totp = pyotp.TOTP(clean)
         self._clock = clock
         self._sleep = sleep
-        self._last_window: int | None = None
+        # window_file shares "last window used" between processes (parallel jobs);
+        # it holds only a time-window number, never a code
+        self._window_file = window_file
+        self._last_window: int | None = self._read_window()
+
+    def _read_window(self) -> int | None:
+        try:
+            return int(self._window_file.read_text().strip()) if self._window_file else None
+        except (OSError, ValueError):
+            return None
+
+    def _remember_window(self, window: int) -> None:
+        self._last_window = window
+        if self._window_file:
+            self._window_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._window_file.with_name(self._window_file.name + ".tmp")
+            tmp.write_text(str(window))
+            os.replace(tmp, self._window_file)
 
     async def get_code(self, challenge: Challenge) -> str:
         if challenge.kind != "totp":
@@ -76,6 +96,9 @@ class TotpCodeProvider:
         window = int(now // self.STEP_SECONDS)
         seconds_left = self.STEP_SECONDS - (now % self.STEP_SECONDS)
 
+        shared = self._read_window()            # another process may have used a code since
+        if shared is not None and (self._last_window is None or shared > self._last_window):
+            self._last_window = shared
         wait = 0.0
         if window == self._last_window:
             wait = seconds_left            # this window's code was already used
@@ -90,7 +113,7 @@ class TotpCodeProvider:
 
         code = self._totp.at(now)
         REDACTOR.add(code, min_length=6)   # from now on it can never appear in a log
-        self._last_window = window
+        self._remember_window(window)
         log.info("2FA: code generated for %s (attempt %d) - value not logged",
                  challenge.reason, challenge.attempt)
         return code
@@ -101,13 +124,14 @@ class TotpCodeProvider:
 _default_provider: CodeProvider | None = None
 
 
-def provider_from_env(clock_offset: float = 0.0) -> TotpCodeProvider:
+def provider_from_env(clock_offset: float = 0.0, window_file: Path | None = None) -> TotpCodeProvider:
     """clock_offset: seconds to add to this computer's clock to match the
-    portal's clock (measured from the server's Date header at login)."""
+    portal's clock (measured from the server's Date header at login).
+    window_file: where the last used code window is shared between processes."""
     from dotenv import load_dotenv
     load_dotenv()
     return TotpCodeProvider(os.getenv("GITHUB_TOTP_SECRET"),
-                            clock=lambda: time.time() + clock_offset)
+                            clock=lambda: time.time() + clock_offset, window_file=window_file)
 
 
 async def get_code(challenge: Challenge) -> str:

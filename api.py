@@ -1,6 +1,6 @@
 """HTTP API in front of the job queue.
 
-    python api.py [--worker] [--visible] [--port 8000] [--host 127.0.0.1]
+    python api.py [--worker] [--parallel N] [--visible] [--port 8000] [--host 127.0.0.1]
 
 Needs API_TOKEN in .env. Listens on this computer only (127.0.0.1) unless
 --host says otherwise. With --worker it also runs the queued jobs, so one
@@ -16,7 +16,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from bot.api import ApiServer
-from bot.jobs import JobQueue, WorkerBusy, work_loop
+from bot.jobs import JobQueue, WorkerBusy, parallel_count, work_loop
 from bot.log import setup_logging
 from bot.redact import REDACTOR
 
@@ -30,6 +30,8 @@ def main() -> int:
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--worker", action="store_true", help="also run the queued jobs in this process")
     p.add_argument("--visible", action="store_true", help="show the browser window for jobs (with --worker)")
+    p.add_argument("--parallel", type=parallel_count, default=1, metavar="N",
+                   help="with --worker: run up to N jobs at the same time")
     args = p.parse_args()
 
     load_dotenv()
@@ -54,7 +56,7 @@ def main() -> int:
             def work() -> None:
                 try:
                     work_loop(queue, ROOT / "output", headless=not args.visible, watch=True,
-                              stop=stop, say=log.info)
+                              stop=stop, say=log.info, parallel=args.parallel)
                 finally:
                     queue.release_worker_lock()
             worker = threading.Thread(target=work, name="worker", daemon=True)
@@ -70,7 +72,7 @@ def main() -> int:
     if worker:
         worker.start()
     log.info("API listening on http://%s:%d  (worker: %s)  - Ctrl+C to stop",
-             args.host, args.port, "on" if worker else "off")
+             args.host, args.port, f"on, {args.parallel} at a time" if worker else "off")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

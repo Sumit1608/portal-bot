@@ -103,7 +103,8 @@ python jobs.py list                                           # status and outpu
 | Option | Effect |
 |---|---|
 | `add ... --break-step STEP` | Queue a job in test mode (see `run.py --break-step`) |
-| `work --once` | Run at most one job |
+| `work --parallel N` | Run up to N jobs at the same time (1 to 4, default 1). See [Several jobs at once](#several-jobs-at-once) |
+| `work --once` | Run at most one job (one per slot with `--parallel`) |
 | `work --watch` | Keep waiting for new jobs after the queue is empty (Ctrl+C to stop) |
 | `work --visible` | Show the browser window (jobs run headless by default) |
 
@@ -115,11 +116,46 @@ How it works:
 - Jobs are files in `jobs/pending/`, `running/`, `done/` and `failed/`. A job
   changes state by an atomic file rename, so it is never in two states at once.
   The input file is copied when the job is added, so later edits don't change it.
-- Only **one worker** runs at a time, because all jobs share one saved GitHub
-  session. A second `work` refuses to start. If a worker is stopped or crashes,
-  the next worker puts the interrupted job back in the queue and runs it again.
+- Only **one worker** serves a queue (it can run several jobs at once with
+  `--parallel`). A second `work` refuses to start. If a worker is stopped or
+  crashes, the next worker puts the interrupted job back in the queue and runs it again.
 - A job that takes over 15 minutes is stopped and marked failed.
 - `jobs/` is ignored by Git.
+
+### Several jobs at once
+
+```bash
+python jobs.py add inputs/example.json inputs/example2.json
+python jobs.py work --parallel 2
+```
+
+Each job is its own `run.py` process with its own browser and output folder,
+so they run side by side and their lines are tagged `[1]`, `[2]`. What they share
+is the saved GitHub login, which is made safe like this:
+
+- **Login lock.** Only one run at a time may check, refresh or save the saved
+  login (`state/github.json.lock`). It is held only for those few seconds.
+  Navigation, the form and the documents then run in parallel. If the login has
+  expired, the first run signs in again. The others wait for it, then reuse the
+  new session instead of each signing in. The wait is recorded in the manifest as
+  stage `wait_session_lock`.
+- **2FA codes are never reused across runs.** The last used 30-second window is
+  shared through `state/github.json.totp-window`. That file holds only a time
+  number, never a code. A run that needs a code in a window another run already
+  used waits for the next one.
+- **`--fresh` is safe too.** The saved login is deleted only while holding the
+  lock, so it is never deleted under a run that is using it.
+- **Taking jobs.** Jobs are taken one at a time, so two slots never get the
+  same job. This is needed on Windows, where two simultaneous renames of one
+  file can both succeed.
+- **Limit.** `--parallel` goes up to 4. Each job is a full browser, so more mostly
+  adds memory use, and it keeps the load on the portal modest.
+
+**More portals or accounts.** The locks belong to the saved-login file.
+A second portal or account would get its own state file, and with it its own
+locks. Its jobs would then not wait for GitHub's at all.
+
+The HTTP API takes the same option: `python api.py --worker --parallel 2`.
 
 ## HTTP API
 
@@ -162,6 +198,7 @@ Invoke-RestMethod http://127.0.0.1:8000/jobs/<id> -Headers $h
 | Option | Effect |
 |---|---|
 | `--worker` | Also run the queued jobs in this process. Without it the API only queues them; run `python jobs.py work --watch` beside it |
+| `--parallel N` | With `--worker`: run up to N jobs at the same time (1 to 4) |
 | `--visible` | Show the browser window for jobs (with `--worker`) |
 | `--port N` | Port to listen on (default 8000) |
 | `--host ADDR` | Address to listen on. The default `127.0.0.1` means only this computer can reach it. Any other value prints a warning |
@@ -187,6 +224,7 @@ Safety:
 | `bot/compare_flow.py` | Navigation and the dependent Compare form |
 | `bot/documents.py` | Print to PDF and the `.patch` in a new tab |
 | `bot/retry.py`, `bot/evidence.py` | Retries with backoff; the redacted evidence bundle |
+| `bot/filelock.py` | Lock shared between processes (saved login, queue worker) |
 | `bot/redact.py`, `bot/secrets_scan.py`, `bot/fixtures.py` | Redaction, leak scanning, cleaned page copies |
 | `fixtures/` | Cleaned copies of GitHub's login, 2FA and compare pages (offline resolver check) |
 | `inputs/` | Input files |
@@ -244,6 +282,8 @@ inbox) can implement the same `get_code` method without changing the login code.
 - **Wrong code:** `answer_challenge()` submits the code; if GitHub rejects it,
   it asks for a new code **once**. The provider never reuses a 30-second
   window, so the retry waits for the next window to get a genuinely new code.
+  The used window is remembered on disk, so this also holds across runs going
+  at the same time.
   A second rejection is a final failure (`CodeRejectedError`): more attempts
   would only risk an account lockout, and the cause (wrong key or a clock that
   is out of sync) needs a human fix.

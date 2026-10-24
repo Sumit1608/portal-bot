@@ -13,6 +13,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .filelock import FileLock
+
 if TYPE_CHECKING:
     from playwright.async_api import BrowserContext
 
@@ -21,8 +23,13 @@ SESSION_COOKIE = "user_session"
 
 
 class SessionStore:
+    """One saved login (one portal account). Parallel runs share it: the lock
+    lets only one of them check, refresh or save it at a time."""
+
     def __init__(self, path: Path):
         self.path = path
+        self.lock = FileLock(path.with_name(path.name + ".lock"))
+        self.totp_window_file = path.with_name(path.name + ".totp-window")
 
     def clear(self) -> None:
         if self.path.exists():

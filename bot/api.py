@@ -19,6 +19,7 @@ from .inputs import InputError
 from .jobs import JobQueue
 
 MAX_BODY = 64 * 1024                 # an input file is a few hundred bytes
+MAX_DISCARD = 1024 * 1024            # an oversized body is read and dropped up to this much
 log = logging.getLogger("bot.api")
 
 
@@ -57,21 +58,29 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_POST(self) -> None:
+        # Take in the whole body BEFORE any answer (even 401/404/413): closing a
+        # connection with unread data makes Windows abort it, and the client
+        # would get a network error instead of the answer.
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if length > MAX_BODY:
+            self._discard(min(length, MAX_DISCARD))
+            self.close_connection = True
+            return self._send(413, {"error": f"body larger than {MAX_BODY} bytes"},
+                              extra={"Connection": "close"})
+        raw = self.rfile.read(length) if length > 0 else b""
+
         path = self.path.split("?", 1)[0].rstrip("/")
         if path != "/jobs":
             return self._send(404, {"error": "not found"})
         if not self._authorized():
             return
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            length = -1
-        if length <= 0:
+        if not raw:
             return self._send(400, {"error": "send the input JSON as the request body"})
-        if length > MAX_BODY:
-            return self._send(413, {"error": f"body larger than {MAX_BODY} bytes"})
         try:
-            body = json.loads(self.rfile.read(length).decode("utf-8-sig"))
+            body = json.loads(raw.decode("utf-8-sig"))
         except (UnicodeDecodeError, json.JSONDecodeError) as e:
             return self._send(400, {"error": f"body is not valid JSON: {e}"})
         if not isinstance(body, dict):
@@ -90,6 +99,13 @@ class Handler(BaseHTTPRequestHandler):
     do_DELETE = do_PATCH = do_PUT
 
     # ------------------------------------------------------------ helpers
+    def _discard(self, length: int) -> None:
+        while length > 0:
+            chunk = self.rfile.read(min(length, 65536))
+            if not chunk:
+                break
+            length -= len(chunk)
+
     def _authorized(self) -> bool:
         given = self.headers.get("Authorization", "")
         expected = f"Bearer {self.server.token}"

@@ -37,6 +37,7 @@ from bot.session import SessionStore
 
 ROOT = Path(__file__).resolve().parent
 STATE_FILE = ROOT / "state" / "github.json"
+SESSION_LOCK_TIMEOUT = 10 * 60      # seconds to wait while another run signs in
 
 
 def parse_args() -> argparse.Namespace:
@@ -91,8 +92,6 @@ async def main() -> int:
         log.warning("Test mode: step '%s' will fail on purpose (--break-step)", args.break_step)
 
     store = SessionStore(STATE_FILE)
-    if args.fresh or args.capture_fixtures:
-        store.clear()
     capture = ROOT / "fixtures" if args.capture_fixtures else None
     evidence = Evidence(out_dir, identifiers)
 
@@ -104,8 +103,15 @@ async def main() -> int:
             auth = GitHubAuth(username, password, store, manifest,
                               capture_dir=capture, on_context=evidence.watch)
             try:
-                context, page = await run_with_retries(
-                    "login", lambda attempt: auth.open(browser), manifest)
+                # parallel runs share the saved login: one at a time checks, refreshes or saves it
+                async with store.lock.hold(timeout=SESSION_LOCK_TIMEOUT) as waited:
+                    manifest.record_stage("wait_session_lock", waited)
+                    if waited > 1:
+                        log.info("Session: waited %.1fs for another run to finish signing in", waited)
+                    if args.fresh or args.capture_fixtures:
+                        store.clear()
+                    context, page = await run_with_retries(
+                        "login", lambda attempt: auth.open(browser), manifest)
                 context.set_default_timeout(20_000)
 
                 form = CompareForm(page, auth.resolver, manifest,

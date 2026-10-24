@@ -39,6 +39,19 @@ def run(coro):
     return asyncio.run(coro)
 
 
+def test_used_window_is_shared_between_processes(tmp_path):
+    """Two parallel runs (two providers, one window file) never send the same code."""
+    shared = tmp_path / "github.json.totp-window"
+    ft = FakeTime(WINDOW + 5)
+    first = TotpCodeProvider(SECRET, clock=ft.clock, sleep=ft.sleep, window_file=shared)
+    second = TotpCodeProvider(SECRET, clock=ft.clock, sleep=ft.sleep, window_file=shared)
+    code1 = run(first.get_code(Challenge()))
+    code2 = run(second.get_code(Challenge()))
+    assert code1 != code2 and ft.slept                     # the second one waited for a new window
+    assert shared.read_text() == str(int(ft.t // 30))      # only a window number is stored
+    assert code1 not in shared.read_text() and code2 not in shared.read_text()
+
+
 def test_code_matches_authenticator_app():
     provider, ft = make(WINDOW + 5)
     code = run(provider.get_code(Challenge()))
