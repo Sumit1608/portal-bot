@@ -1,12 +1,14 @@
 """Main command.
 
     python run.py --input inputs/example.json [--headless] [--fresh]
+                  [--capture-fixtures] [--break-step STEP]
 
-Current version: loads inputs, signs in to GitHub (reusing the saved session
-when it is still alive, otherwise a full login with 2FA), clicks through
-repository -> Pull requests -> New pull request, fills the 4-field Compare
-form, saves the comparison as a PDF (print) and a .patch (new tab), and
-writes the manifest and a redacted run.log.
+Signs in to GitHub (reusing the saved session when it is still alive,
+otherwise a full login with 2FA), clicks through repository -> Pull requests
+-> New pull request, fills the 4-field Compare form, saves the comparison as
+a PDF (print) and a .patch (new tab), and writes the manifest and a redacted
+run.log. Each step is retried with backoff when the failure is retryable; on
+a final failure a redacted evidence bundle is written.
 """
 import argparse
 import asyncio
@@ -19,13 +21,16 @@ from pathlib import Path
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
+from bot import faults
 from bot.compare_flow import CompareForm
 from bot.documents import capture_documents
+from bot.evidence import Evidence
 from bot.github_login import GitHubAuth
 from bot.inputs import InputError, load_inputs
 from bot.log import setup_logging
 from bot.manifest import Manifest
 from bot.redact import REDACTOR
+from bot.retry import FinalFailure, first_line, run_with_retries
 from bot.session import SessionStore
 
 ROOT = Path(__file__).resolve().parent
@@ -39,6 +44,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--fresh", action="store_true", help="delete the saved session first (forces a full login)")
     p.add_argument("--capture-fixtures", action="store_true",
                    help="save cleaned copies of the login, 2FA and compare pages to fixtures/ (implies --fresh)")
+    p.add_argument("--break-step", choices=faults.STEPS,
+                   help="make this step fail on purpose, to see retries and the evidence bundle")
     return p.parse_args()
 
 
@@ -59,10 +66,10 @@ async def main() -> int:
     if not username or not password or username == "your-username":
         print("Missing GITHUB_USERNAME or GITHUB_PASSWORD in .env")
         return 2
-    for value in (password, os.getenv("GITHUB_TOTP_SECRET")):   # never let these reach a log
-        REDACTOR.add(value)
-    for value in os.getenv("REDACT_EXTRA", "").split(","):     # e.g. your display name, email
-        REDACTOR.add(value.strip())
+    extras = [v.strip() for v in os.getenv("REDACT_EXTRA", "").split(",") if v.strip()]
+    identifiers = [username, *extras]
+    for value in (password, os.getenv("GITHUB_TOTP_SECRET"), *identifiers):
+        REDACTOR.add(value)                      # never let these reach a log or evidence
 
     run_id = f"{datetime.now():%Y%m%d-%H%M%S}-{inputs.label}"
     out_dir = ROOT / "output" / run_id
@@ -71,39 +78,62 @@ async def main() -> int:
     log = setup_logging(out_dir / "run.log")
     log.info("Run %s started with %s", run_id, args.input)
 
+    faults.active = args.break_step
+    if args.break_step:
+        log.warning("Test mode: step '%s' will fail on purpose (--break-step)", args.break_step)
+
     store = SessionStore(STATE_FILE)
     if args.fresh or args.capture_fixtures:
         store.clear()
+    capture = ROOT / "fixtures" if args.capture_fixtures else None
+    evidence = Evidence(out_dir, identifiers)
 
     status, error = "failed", None
     try:
         async with async_playwright() as p:
             with manifest.stage("launch_browser"):
                 browser = await p.chromium.launch(headless=args.headless)
+            auth = GitHubAuth(username, password, store, manifest,
+                              capture_dir=capture, on_context=evidence.watch)
             try:
-                capture = ROOT / "fixtures" if args.capture_fixtures else None
-                auth = GitHubAuth(username, password, store, manifest, capture_dir=capture)
-                context, page = await auth.open(browser)
+                context, page = await run_with_retries(
+                    "login", lambda attempt: auth.open(browser), manifest)
                 context.set_default_timeout(20_000)
 
                 form = CompareForm(page, auth.resolver, manifest,
-                                   capture_dir=capture, identifiers=[username])
-                await form.navigate(inputs.base_repo)
-                await form.fill(inputs)
-                await capture_documents(p, browser, context, page, inputs, manifest,
-                                        out_dir, args.headless)
+                                   capture_dir=capture, identifiers=identifiers)
+
+                async def form_step(attempt: int) -> None:
+                    await form.navigate(inputs.base_repo)     # a retry starts from the repository again
+                    await form.fill(inputs)
+
+                await run_with_retries("form", form_step, manifest)
+                await run_with_retries(
+                    "capture_document",
+                    lambda attempt: capture_documents(p, browser, context, page, inputs, manifest,
+                                                      out_dir, args.headless, on_context=evidence.watch),
+                    manifest)
+            except FinalFailure as failure:
+                await evidence.write(failure, manifest, auth.resolver)
+                raise
             finally:
                 await browser.close()
         status = "success"
-    except Exception as e:
-        error = REDACTOR.scrub(f"{type(e).__name__}: {e}")
-        log.error("Run failed: %s", error)
+    except FinalFailure as failure:
+        error = str(failure)
+    except Exception as e:                       # e.g. the browser could not start
+        error = f"{type(e).__name__}: {first_line(e)}"
     finally:
-        manifest.finish(status, error)
+        manifest.finish(status, REDACTOR.scrub(error) if error else None)
         path = manifest.write()
 
     s = manifest.data["session"]
-    how = "reused saved session" if s["reused"] else f"full login ({s['dead_session_reason']})"
+    how = ("reused saved session" if s["reused"] else
+           f"full login ({s['dead_session_reason']})" if s["full_login"] else "no session")
+    if error:
+        log.error("Run FAILED in %.1fs - %s", manifest.data["total_seconds"], error)
+        if manifest.data["evidence"]:
+            log.error("Evidence bundle: %s", (out_dir / "evidence").relative_to(ROOT))
     log.info("Run %s in %.1fs - %s - manifest: %s",
              status.upper(), manifest.data["total_seconds"], how, path.relative_to(ROOT))
     for f in manifest.data["captured_files"]:

@@ -35,6 +35,7 @@ def sha256_of(path: Path) -> str:
 class Manifest:
     def __init__(self, run_id: str, input_file: str, inputs: dict, out_dir: Path):
         self.out_dir = out_dir
+        self.attempt = 1            # set by the retry wrapper
         self._t0 = time.perf_counter()
         self.data = {
             "run_id": run_id,
@@ -48,7 +49,9 @@ class Manifest:
             "pages_visited": [],
             "stages": [],
             "captured_files": [],
+            "retries": [],
             "error": None,
+            "evidence": None,
             "environment": {"python": platform.python_version(), "os": platform.system()},
         }
 
@@ -59,7 +62,7 @@ class Manifest:
     @contextmanager
     def stage(self, key: str):
         """Time a block of work:  with manifest.stage("login"): ..."""
-        entry = {"key": key, "status": "running", "seconds": None}
+        entry = {"key": key, "attempt": self.attempt, "status": "running", "seconds": None}
         self.data["stages"].append(entry)
         start = time.perf_counter()
         try:

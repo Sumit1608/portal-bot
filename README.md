@@ -33,7 +33,8 @@ python run.py --input inputs/example.json
 |---|---|
 | `--fresh` | Delete the saved session first, forcing a full login |
 | `--headless` | Run without a visible browser window |
-| `--capture-fixtures` | Full login that also saves cleaned copies of the login and 2FA pages to `fixtures/` |
+| `--capture-fixtures` | Full login that also saves cleaned copies of the login, 2FA and compare pages to `fixtures/` |
+| `--break-step STEP` | Make `navigate`, `fill_form` or `capture_document` fail on purpose, to see retries and the evidence bundle |
 
 ## Environment variables (`.env`)
 
@@ -43,6 +44,7 @@ python run.py --input inputs/example.json
 | `GITHUB_PASSWORD` | yes | Your GitHub password |
 | `GITHUB_TOTP_SECRET` | yes | The 2FA "setup key" shown when enabling authenticator-app 2FA |
 | `REDACT_EXTRA` | no | Extra words to mask in logs and saved pages, comma-separated (e.g. your display name, email) |
+| `MAX_ATTEMPTS` | no | Attempts per step for retryable failures (default 3) |
 
 `.env` is ignored by Git and never committed.
 
@@ -195,6 +197,48 @@ manifest, so two runs can be compared.
 | Fields folded away after each reload | Compare form | "Compare across forks" is switched on again before reading a repository field |
 | Extra pages after login (2FA check-up, passkey offers) | Login | Recognised and skipped |
 | Computer clock out of sync | 2FA | Code timing corrected using GitHub's clock |
+
+### Retries: which failures retry
+
+The run has three steps, each retried as a unit: **login**, **form**
+(navigation and filling; a retry starts again from the repository page) and
+**capture_document**. A retryable failure is retried up to `MAX_ATTEMPTS`
+times (default 3) with exponential backoff and jitter: about 2s, then 4s, then
+8s, capped at 20s. Every attempt is recorded in the manifest under `retries`.
+
+| Retryable (may work next time) | Final (retrying can't help, or would make it worse) |
+|---|---|
+| Page or element not loaded in time (timeouts) | Invalid input file |
+| Element not found (page only partly rendered) | Branch or repository the portal doesn't offer |
+| A click that didn't open the next page | Wrong username or password |
+| Network errors, error pages | 2FA code rejected twice (more tries risk a lockout) |
+| Document empty or invalid | CAPTCHA (needs a human; never bypassed) |
+| | Missing or invalid 2FA secret |
+| | Any unexpected program error (a bug, not a portal hiccup) |
+
+### Evidence bundle on final failure
+
+When a step fails for good, `output/<run-id>/evidence/` is written:
+
+| File | Contents |
+|---|---|
+| `screenshot.png` | The page at the moment of failure. Before the shot, account names are replaced on the page, all fields are emptied, images (avatars) are hidden, and password boxes are masked |
+| `page.html` | The page's HTML, cleaned like the fixtures: no scripts, tokens or form values |
+| `url.txt` | The page address, query string removed |
+| `console.log` | Browser console messages and page errors from the whole run |
+| `evidence.json` | The stage key, error, whether it was retryable, every retry, and the resolver's attempts (strategy, query, number of matches) for the failing element and all others |
+
+Everything is redacted: the password, the 2FA secret, every 2FA code, the
+username and `REDACT_EXTRA` words. As a last line of defence the bundle is then
+scanned for those values in plain, URL-encoded and base64 form. Any text file
+that still contains one is blanked, and the result is recorded in the manifest.
+
+Try it (evaluation scenario 6):
+
+```bash
+python run.py --input inputs/example.json --break-step fill_form
+python scripts/check_no_secrets.py output/<run-id>/evidence
+```
 
 ### Locator strategy: order and why
 

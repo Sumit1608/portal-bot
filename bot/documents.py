@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote, urlsplit, urlunsplit
 
+from . import faults
+
 if TYPE_CHECKING:
     from playwright.async_api import Browser, BrowserContext, Page, Playwright
 
@@ -89,12 +91,15 @@ async def _settle(page: Page) -> None:
 
 
 async def capture_documents(playwright: Playwright, browser: Browser, context: BrowserContext,
-                            page: Page, inputs, manifest, out_dir: Path, headless: bool) -> None:
+                            page: Page, inputs, manifest, out_dir: Path, headless: bool,
+                            on_context=None) -> None:
     docs = out_dir / "documents"
     docs.mkdir(parents=True, exist_ok=True)
     source = without_query(page.url) if "/compare/" in page.url else compare_url(inputs)
 
     with manifest.stage("capture_document"):
+        if faults.is_broken("capture_document"):
+            raise DocumentError("Injected failure (--break-step capture_document)")
         state = await context.storage_state()      # the signed-in session, for the printer
 
         # ---- 1. print to PDF -------------------------------------------------
@@ -102,6 +107,8 @@ async def capture_documents(playwright: Playwright, browser: Browser, context: B
         try:
             printer = await printer_browser.new_context(storage_state=state,
                                                         viewport={"width": 1280, "height": 900})
+            if on_context:
+                on_context(printer)
             pdf_page = await printer.new_page()
             await pdf_page.goto(source, wait_until="domcontentloaded")
             outcome = await wait_for_comparison(pdf_page)

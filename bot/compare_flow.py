@@ -22,7 +22,7 @@ from urllib.parse import unquote, urljoin, urlsplit
 
 from playwright.async_api import Page
 
-from . import targets
+from . import faults, targets
 from .fixtures import save_fixture
 from .resolver import ResolveError, Resolver, Target
 
@@ -101,6 +101,8 @@ class CompareForm:
     # ------------------------------------------------------------ navigation
     async def navigate(self, repo: str) -> None:
         with self.manifest.stage("navigate"):
+            if faults.is_broken("navigate"):
+                repo = f"{repo}-broken-on-purpose"
             url = f"https://github.com/{repo}"
             response = await self.page.goto(url, wait_until="domcontentloaded")
             if response is None or response.status >= 400:
@@ -234,7 +236,9 @@ class CompareForm:
                 await save_fixture(self.page, self.capture_dir / "github_compare.html", self.identifiers)
 
             await self._choose(targets.BASE_REPO_PICKER, inputs.base_repo, "base repository", None)
-            await self._choose(targets.BASE_BRANCH_PICKER, inputs.base_branch, "base branch",
+            base_branch_picker = (faults.BROKEN_BASE_BRANCH if faults.is_broken("fill_form")
+                                  else targets.BASE_BRANCH_PICKER)
+            await self._choose(base_branch_picker, inputs.base_branch, "base branch",
                                f"base repository {inputs.base_repo}")
             await self._choose(targets.HEAD_REPO_PICKER, inputs.head_repo, "head repository", None)
             await self._choose(targets.HEAD_BRANCH_PICKER, inputs.head_branch, "compare branch",

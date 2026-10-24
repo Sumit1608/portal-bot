@@ -6,6 +6,7 @@ RedactingFilter, which replaces registered values with [REDACTED] - so even
 an accidental log call cannot leak them.
 """
 import logging
+import re
 import threading
 
 MASK = "[REDACTED]"
@@ -24,9 +25,10 @@ class Redactor:
     def scrub(self, text: str) -> str:
         with self._lock:
             values = sorted(self._values, key=len, reverse=True)   # longest first
-        for value in values:
-            text = text.replace(value, MASK)
-        return text
+        if not values:
+            return text
+        pattern = re.compile("|".join(re.escape(v) for v in values), re.IGNORECASE)
+        return pattern.sub(MASK, text)
 
 
 REDACTOR = Redactor()

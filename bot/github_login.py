@@ -24,7 +24,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeout
 from . import targets
 from .code_provider import answer_challenge, provider_from_env
 from .fixtures import save_fixture
-from .resolver import ResolveError, Resolver
+from .resolver import Resolver
 from .session import SessionStore
 
 log = logging.getLogger("bot.login")
@@ -64,19 +64,19 @@ def _clock_offset(response) -> float:
 
 class GitHubAuth:
     def __init__(self, username: str, password: str, store: SessionStore, manifest,
-                 resolver: Resolver | None = None, capture_dir: Path | None = None):
+                 resolver: Resolver | None = None, capture_dir: Path | None = None,
+                 on_context=None):
         self.username = username
         self.password = password
         self.store = store
         self.manifest = manifest
         self.resolver = resolver or Resolver()
         self.capture_dir = capture_dir      # set by --capture-fixtures
+        self.on_context = on_context or (lambda context: None)   # evidence collector hook
 
     async def _find(self, page: Page, target, timeout: float = 15.0):
-        try:
-            return await self.resolver.find(page, target, timeout=timeout)
-        except ResolveError as e:
-            raise LoginError(str(e)) from e
+        # a missing element is a ResolveError (retryable), not a LoginError (final)
+        return await self.resolver.find(page, target, timeout=timeout)
 
     async def _capture(self, page: Page, name: str) -> None:
         if self.capture_dir:
@@ -99,6 +99,7 @@ class GitHubAuth:
             if state_path:
                 try:
                     context = await browser.new_context(storage_state=str(state_path))
+                    self.on_context(context)
                 except PlaywrightError:
                     self.store.quarantine()
                     state_path, reason = None, "saved session file could not be loaded"
@@ -116,6 +117,7 @@ class GitHubAuth:
         log.info("Session: %s - doing a full login", reason)
         session.update(reused=False, full_login=True, dead_session_reason=reason)
         context = await browser.new_context()
+        self.on_context(context)
         page = await context.new_page()
         with self.manifest.stage("full_login"):
             await self.full_login(page)
