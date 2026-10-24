@@ -1,13 +1,10 @@
 # portal-bot
 
-A single-process Playwright command-line program that signs in to **GitHub**
-(my own account, my own public repository) with an **authenticator-app second
-factor**, reuses the session on later runs, clicks three pages deep to the
-**Compare changes** form, fills its four fields (two of them dependent), and
-saves the comparison GitHub produces as a **PDF (print)** and a **.patch
-(new tab)**, with a JSON manifest of the run.
-
-One site covers every requirement, so no second site is used.
+A Playwright command-line program that signs in to **GitHub** with a password
+and an **authenticator code**, reuses the session, clicks three pages deep to
+the **Compare** form, fills its four fields (two dependent), and saves the
+result as a **PDF (print)** and a **.patch (new tab)**, with a JSON manifest.
+One site covers every requirement.
 
 | Deliverable | Where |
 |---|---|
@@ -38,7 +35,7 @@ Then activate the environment (once per terminal):
 |---|---|
 | `source .venv/bin/activate` | `.venv\Scripts\Activate.ps1` |
 
-Fill in `.env`, then run:
+Fill in `.env` (see [Environment variables](#environment-variables-env)), then run:
 
 ```bash
 python run.py --input inputs/example.json
@@ -58,12 +55,30 @@ python run.py --input inputs/example.json
 |---|---|---|
 | `GITHUB_USERNAME` | yes | Your GitHub username |
 | `GITHUB_PASSWORD` | yes | Your GitHub password |
-| `GITHUB_TOTP_SECRET` | yes | The 2FA "setup key" shown when enabling authenticator-app 2FA |
+| `GITHUB_TOTP_SECRET` | yes | The 2FA "setup key" of your authenticator app ([how to get it](#getting-the-2fa-setup-key)) |
 | `REDACT_EXTRA` | no | Extra words to mask in logs and saved pages, comma-separated (e.g. your display name, email) |
 | `MAX_ATTEMPTS` | no | Attempts per step for retryable failures (default 3) |
 | `API_TOKEN` | only for `api.py` | Password for HTTP API requests, at least 16 characters ([HTTP API](#http-api)) |
 
 `.env` is ignored by Git and never committed.
+
+### Getting the 2FA setup key
+
+The bot needs your GitHub account to use an **authenticator app** as its second
+factor, and the text key behind that app's QR code:
+
+1. On github.com open **Settings → Password and authentication**.
+2. Under **Two-factor methods → Authenticator app**, click **Edit** (or
+   **Enable two-factor authentication** if 2FA is off).
+3. Below the QR code, click **setup key** and copy the text (letters A-Z and
+   digits 2-7, spaces don't matter) into `.env` as `GITHUB_TOTP_SECRET`.
+4. Scan the same QR code with your phone's authenticator app, type the code it
+   shows into GitHub and save. Phone and bot now produce the same codes.
+5. Check it: `python scripts/check_totp.py`, then type the code from your phone.
+   It must say **MATCH**.
+
+Editing the authenticator app replaces the old key, so the phone must scan the
+new QR code (step 4). The key is like a password: keep it only in `.env`.
 
 ## Input file
 
