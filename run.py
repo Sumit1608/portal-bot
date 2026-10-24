@@ -2,20 +2,26 @@
 
     python run.py --input inputs/example.json [--headless]
 
-Step 2 version: loads inputs, opens the repository page, writes the manifest.
+Current version: loads inputs, opens the repository page, writes the manifest
+and a redacted run.log.
 Login, the form and document capture are added in later steps.
 """
 import argparse
 import asyncio
+import logging
+import os
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
+from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
 from bot.inputs import InputError, load_inputs
+from bot.log import setup_logging
 from bot.manifest import Manifest
+from bot.redact import REDACTOR
 
 ROOT = Path(__file__).resolve().parent
 
@@ -43,6 +49,12 @@ async def main() -> int:
     manifest = Manifest(run_id, args.input, inputs.to_dict(), out_dir)
     manifest.record_stage("load_inputs", load_seconds)
 
+    load_dotenv()
+    for name in ("GITHUB_PASSWORD", "GITHUB_TOTP_SECRET"):   # never let these reach a log
+        REDACTOR.add(os.getenv(name))
+    log = setup_logging(out_dir / "run.log")
+    log.info("Run %s started with %s", run_id, args.input)
+
     status, error = "failed", None
     try:
         async with async_playwright() as p:
@@ -61,14 +73,13 @@ async def main() -> int:
                 await browser.close()
         status = "success"
     except Exception as e:
-        error = f"{type(e).__name__}: {e}"
+        error = REDACTOR.scrub(f"{type(e).__name__}: {e}")
+        log.error("Run failed: %s", error)
     finally:
         manifest.finish(status, error)
         path = manifest.write()
 
-    print(f"Run {status.upper()} - manifest: {path.relative_to(ROOT)}")
-    if error:
-        print(f"Error: {error}")
+    log.info("Run %s - manifest: %s", status.upper(), path.relative_to(ROOT))
     return 0 if status == "success" else 1
 
 
