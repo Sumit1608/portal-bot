@@ -101,10 +101,13 @@ class TotpCodeProvider:
 _default_provider: CodeProvider | None = None
 
 
-def provider_from_env() -> TotpCodeProvider:
+def provider_from_env(clock_offset: float = 0.0) -> TotpCodeProvider:
+    """clock_offset: seconds to add to this computer's clock to match the
+    portal's clock (measured from the server's Date header at login)."""
     from dotenv import load_dotenv
     load_dotenv()
-    return TotpCodeProvider(os.getenv("GITHUB_TOTP_SECRET"))
+    return TotpCodeProvider(os.getenv("GITHUB_TOTP_SECRET"),
+                            clock=lambda: time.time() + clock_offset)
 
 
 async def get_code(challenge: Challenge) -> str:
