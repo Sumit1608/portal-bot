@@ -12,13 +12,12 @@ to stop). `list` shows every job and its result. Jobs live in jobs/.
 """
 import argparse
 import sys
-from pathlib import Path
 
 from bot import faults
+from bot.config import ROOT
 from bot.inputs import InputError
 from bot.jobs import MAX_PARALLEL, JobQueue, WorkerBusy, parallel_count, work_loop
 
-ROOT = Path(__file__).resolve().parent
 QUEUE_DIR = ROOT / "jobs"
 
 

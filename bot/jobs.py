@@ -23,15 +23,16 @@ import secrets
 import subprocess
 import sys
 import threading
-import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
 from . import faults
+from .config import ROOT
 from .filelock import FileLock
 from .inputs import InputError, RunInputs, load_inputs, parse_inputs
+from .util import retry_busy, utc_now, write_atomic
 
 STATES = ("pending", "running", "done", "failed")
 JOB_ID = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
@@ -50,29 +51,8 @@ def parallel_count(text: str) -> int:
     return n
 
 
-def _retry_busy(action: Callable[[], object]):
-    """Windows briefly refuses to open a file that is being replaced, or to
-    replace one that someone is reading (e.g. the API) - PermissionError.
-    Try again a few times. FileNotFoundError is passed on: the job moved."""
-    for attempt in range(25):
-        try:
-            return action()
-        except PermissionError:
-            if attempt == 24:
-                raise
-            time.sleep(0.02)
-
-
 def _read_json(path: Path) -> dict:
-    return _retry_busy(lambda: json.loads(path.read_text(encoding="utf-8")))
-
-
-def _replace(src: Path, dst: Path) -> None:
-    _retry_busy(lambda: src.replace(dst))
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return retry_busy(lambda: json.loads(path.read_text(encoding="utf-8")))
 
 
 class WorkerBusy(RuntimeError):
@@ -118,7 +98,7 @@ class JobQueue:
         data = {
             "id": job_id,
             "status": "pending",
-            "created_at": _now(),
+            "created_at": utc_now(),
             "started_at": None,
             "finished_at": None,
             "input_file": source,
@@ -164,7 +144,7 @@ class JobQueue:
                 except (FileNotFoundError, PermissionError):
                     continue                       # removed meanwhile
                 job = Job(target, _read_json(target))
-                job.data.update(status="running", started_at=_now())
+                job.data.update(status="running", started_at=utc_now())
                 self._write(target, job.data)
                 return job
         return None
@@ -172,7 +152,7 @@ class JobQueue:
     def finish(self, job: Job, exit_code: int, manifest: dict | None, error: str | None = None) -> None:
         job.data.update(
             status="done" if exit_code == 0 else "failed",
-            finished_at=_now(),
+            finished_at=utc_now(),
             exit_code=exit_code,
             run_status=manifest.get("status") if manifest else None,
             error=error or (manifest.get("error") if manifest else None),
@@ -214,14 +194,12 @@ class JobQueue:
     def _move(self, job: Job, state: str) -> None:
         target = self.root / state / job.path.name
         self._write(job.path, job.data)
-        _replace(job.path, target)
+        retry_busy(lambda: job.path.replace(target))
         job.path = target
 
     @staticmethod
     def _write(path: Path, data: dict) -> None:
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        _replace(tmp, path)
+        write_atomic(path, json.dumps(data, indent=2))
 
 
 # ---------------------------------------------------------------- running
@@ -232,7 +210,7 @@ def subprocess_runner(args: list[str], log_file: Path) -> int:
     """Run `python run.py ...` as its own process, console output to log_file."""
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     with open(log_file, "w", encoding="utf-8") as log:
-        proc = subprocess.run([sys.executable, *args], cwd=Path(__file__).resolve().parent.parent,
+        proc = subprocess.run([sys.executable, *args], cwd=ROOT,
                               stdout=log, stderr=subprocess.STDOUT, env=env, timeout=JOB_TIMEOUT)
     return proc.returncode
 

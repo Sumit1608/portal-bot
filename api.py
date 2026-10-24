@@ -11,16 +11,15 @@ import argparse
 import os
 import sys
 import threading
-from pathlib import Path
 
 from dotenv import load_dotenv
 
 from bot.api import ApiServer
+from bot.config import ROOT
 from bot.jobs import JobQueue, WorkerBusy, parallel_count, work_loop
 from bot.log import setup_logging
 from bot.redact import REDACTOR
 
-ROOT = Path(__file__).resolve().parent
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
@@ -34,7 +33,7 @@ def main() -> int:
                    help="with --worker: run up to N jobs at the same time")
     args = p.parse_args()
 
-    load_dotenv()
+    load_dotenv(ROOT / ".env")
     token = os.getenv("API_TOKEN", "").strip()
     if len(token) < 16:
         print("API_TOKEN in .env is missing or shorter than 16 characters.")

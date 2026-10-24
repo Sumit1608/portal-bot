@@ -6,7 +6,6 @@ state/
 
 # Run outputs
 output/
-evidence/
 jobs/
 
 # Python / editor junk

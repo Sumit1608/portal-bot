@@ -14,7 +14,7 @@ No network is used: the browser context is offline and every request is blocked.
 import json
 from pathlib import Path
 
-from playwright.async_api import async_playwright
+from playwright.async_api import BrowserContext, async_playwright
 
 from .resolver import ResolveError, Resolver
 from .targets import FIXTURE_TARGETS
@@ -61,19 +61,22 @@ MUTATIONS_JS = {
         document.body.appendChild(f);
     }""",
 }
-ORDER = ["original", "renamed_classes", "renamed_ids", "reordered_siblings",
-         "wrapper_divs", "inside_iframe", "all_combined"]
+# each variant: the mutations applied, in order
+VARIANTS = {"original": [], **{name: [name] for name in MUTATIONS_JS}, "all_combined": list(MUTATIONS_JS)}
 
 
-def _steps(mutation: str) -> list[str]:
-    if mutation == "original":
-        return []
-    if mutation == "all_combined":
-        return [m for m in ORDER if m in MUTATIONS_JS]
-    return [mutation]
+async def _mutated_html(context: BrowserContext, html: str, steps: list[str]) -> str:
+    page = await context.new_page()
+    await page.set_content(html, wait_until="domcontentloaded")
+    for step in steps:
+        await page.evaluate(MUTATIONS_JS[step])
+    mutated = await page.content()
+    await page.close()
+    return mutated
 
 
 async def run_offline_check(fixtures_dir: Path, out_dir: Path) -> list[dict]:
+    """One result row per (page, variant, element): found or not, and by which strategy."""
     results: list[dict] = []
     out_dir.mkdir(parents=True, exist_ok=True)
     async with async_playwright() as p:
@@ -88,14 +91,8 @@ async def run_offline_check(fixtures_dir: Path, out_dir: Path) -> list[dict]:
                                     "found": None, "strategy": "skipped - page not captured yet"})
                     continue
                 html = source.read_text(encoding="utf-8")
-                for mutation in ORDER:
-                    page = await context.new_page()
-                    await page.set_content(html, wait_until="domcontentloaded")
-                    for step in _steps(mutation):
-                        await page.evaluate(MUTATIONS_JS[step])
-                    mutated = await page.content()
-                    await page.close()
-
+                for mutation, steps in VARIANTS.items():
+                    mutated = await _mutated_html(context, html, steps)
                     variant = out_dir / fixture.replace(".html", "") / f"{mutation}.html"
                     variant.parent.mkdir(parents=True, exist_ok=True)
                     variant.write_text(mutated, encoding="utf-8")

@@ -15,16 +15,19 @@ import re
 import time
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlsplit
 
-from playwright.async_api import Browser, BrowserContext, Page
+from playwright.async_api import Browser, BrowserContext, Page, Response
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from . import targets
-from .code_provider import answer_challenge, provider_from_env
+from .code_provider import TotpCodeProvider, answer_challenge
+from .errors import FinalError
 from .fixtures import save_fixture
-from .resolver import Resolver
+from .manifest import Manifest
+from .resolver import Resolver, Target
 from .session import SessionStore
 
 log = logging.getLogger("bot.login")
@@ -34,21 +37,25 @@ LOGIN_URL = f"{BASE}/login"
 TOTP_URL = f"{BASE}/sessions/two-factor/app"
 PROBE_URL = f"{BASE}/settings/profile"        # only reachable when signed in
 LOGIN_PATHS = ("/login", "/session")
+TWO_FACTOR_PATH = "/sessions/two-factor"
+INTERSTITIAL = re.compile(r"checkup|upsell|passkey|/sessions/|confirm")
+SKIP_BUTTONS = ("Remind me later", "Not now", "Skip for now", "Skip", "Done", "Continue")
+CAPTCHA = "iframe[src*='captcha'], #captcha-container, [data-captcha]"
 
 
-class LoginError(RuntimeError):
-    """Credentials rejected or the login page cannot be used. Final."""
+class LoginError(FinalError):
+    """Credentials rejected or the login page cannot be used."""
 
 
 class CaptchaError(LoginError):
-    """GitHub asked for a CAPTCHA. Needs a human - not bypassed. Final."""
+    """GitHub asked for a CAPTCHA. Needs a human - never bypassed."""
 
 
 def _path(url: str) -> str:
     return urlsplit(url).path.rstrip("/") or "/"
 
 
-def _clock_offset(response) -> float:
+def _clock_offset(response: Response | None) -> float:
     """Seconds to add to this computer's clock to match GitHub's clock."""
     try:
         server = parsedate_to_datetime(response.headers["date"]).timestamp()
@@ -63,18 +70,19 @@ def _clock_offset(response) -> float:
 
 
 class GitHubAuth:
-    def __init__(self, username: str, password: str, store: SessionStore, manifest,
-                 resolver: Resolver | None = None, capture_dir: Path | None = None,
-                 on_context=None):
+    def __init__(self, username: str, password: str, totp_secret: str, store: SessionStore,
+                 manifest: Manifest, capture_dir: Path | None = None,
+                 on_context: Callable[[BrowserContext], None] = lambda context: None):
         self.username = username
         self.password = password
+        self.totp_secret = totp_secret
         self.store = store
         self.manifest = manifest
-        self.resolver = resolver or Resolver()
+        self.resolver = Resolver()
         self.capture_dir = capture_dir      # set by --capture-fixtures
-        self.on_context = on_context or (lambda context: None)   # evidence collector hook
+        self.on_context = on_context        # the evidence collector watches every context
 
-    async def _find(self, page: Page, target, timeout: float = 15.0):
+    async def _find(self, page: Page, target: Target, timeout: float = 15.0):
         # a missing element is a ResolveError (retryable), not a LoginError (final)
         return await self.resolver.find(page, target, timeout=timeout)
 
@@ -82,43 +90,34 @@ class GitHubAuth:
         if self.capture_dir:
             await save_fixture(page, self.capture_dir / name, [self.username])
 
-    async def _record(self, page: Page, stage: str) -> None:
-        try:
-            title = await page.title()
-        except PlaywrightError:
-            title = ""
-        self.manifest.page_visited(page.url, title, stage)
+    async def _new_context(self, browser: Browser, **options) -> tuple[BrowserContext, Page]:
+        context = await browser.new_context(**options)
+        self.on_context(context)
+        return context, await context.new_page()
 
     # ---------------------------------------------------------------- public
     async def open(self, browser: Browser) -> tuple[BrowserContext, Page]:
-        session = self.manifest.data["session"]
-
+        """A signed-in browser tab: the saved session if it is still alive, else a full login."""
         with self.manifest.stage("session_check"):
             state_path, reason = self.store.usable_state()
-            alive = False
             if state_path:
                 try:
-                    context = await browser.new_context(storage_state=str(state_path))
-                    self.on_context(context)
+                    context, page = await self._new_context(browser, storage_state=str(state_path))
                 except PlaywrightError:
                     self.store.quarantine()
                     state_path, reason = None, "saved session file could not be loaded"
             if state_path:
-                page = await context.new_page()
                 alive, reason = await self.probe(page)
-                if not alive:
-                    await context.close()
-
-        if alive:
-            log.info("Session: saved session is alive - no login needed")
-            session.update(reused=True, full_login=False, dead_session_reason=None)
-            return context, page
+                if alive:
+                    log.info("Session: saved session is alive - no login needed")
+                    self.manifest.data["session"].update(reused=True, full_login=False,
+                                                         dead_session_reason=None)
+                    return context, page
+                await context.close()
 
         log.info("Session: %s - doing a full login", reason)
-        session.update(reused=False, full_login=True, dead_session_reason=reason)
-        context = await browser.new_context()
-        self.on_context(context)
-        page = await context.new_page()
+        self.manifest.data["session"].update(reused=False, full_login=True, dead_session_reason=reason)
+        context, page = await self._new_context(browser)
         with self.manifest.stage("full_login"):
             await self.full_login(page)
             alive, why = await self.probe(page)
@@ -142,7 +141,7 @@ class GitHubAuth:
             response = await page.goto(PROBE_URL, wait_until="domcontentloaded")
         except PlaywrightError as e:
             return False, f"session probe page failed to load ({type(e).__name__})"
-        await self._record(page, "session_check")
+        await self.manifest.visit(page, "session_check")
 
         if response is not None and response.status >= 400:
             return False, f"session probe returned HTTP {response.status}"
@@ -162,7 +161,7 @@ class GitHubAuth:
     # ------------------------------------------------------------ full login
     async def full_login(self, page: Page) -> None:
         response = await page.goto(LOGIN_URL, wait_until="domcontentloaded")
-        await self._record(page, "full_login")
+        await self.manifest.visit(page, "full_login")
         offset = _clock_offset(response)
         await self._fail_on_captcha(page)
 
@@ -177,9 +176,9 @@ class GitHubAuth:
         except PlaywrightTimeout:
             await self._fail_on_captcha(page)
             raise LoginError("GitHub did not accept the username or password") from None
-        await self._record(page, "full_login")
+        await self.manifest.visit(page, "full_login")
 
-        if _path(page.url).startswith("/sessions/two-factor"):
+        if _path(page.url).startswith(TWO_FACTOR_PATH):
             await self._two_factor(page, offset)
         await self._skip_interstitials(page)
         log.info("Login: signed in")
@@ -188,9 +187,9 @@ class GitHubAuth:
         if _path(page.url) != _path(TOTP_URL):
             log.info("2FA: GitHub offered another method - switching to the authenticator app")
             await page.goto(TOTP_URL, wait_until="domcontentloaded")
-            await self._record(page, "full_login")
-        provider = provider_from_env(clock_offset=clock_offset, window_file=self.store.totp_window_file)
-
+            await self.manifest.visit(page, "full_login")
+        provider = TotpCodeProvider(self.totp_secret, clock=lambda: time.time() + clock_offset,
+                                    window_file=self.store.totp_window_file)
         captured = False
 
         async def submit(code: str) -> bool:
@@ -206,39 +205,38 @@ class GitHubAuth:
                 verify = await self._find(page, targets.TOTP_VERIFY, timeout=5)
                 async with page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
                     await verify.click()
-            await self._record(page, "full_login")
+            await self.manifest.visit(page, "full_login")
 
-            if not _path(page.url).startswith("/sessions/two-factor"):
+            if not _path(page.url).startswith(TWO_FACTOR_PATH):
                 return True                          # left the 2FA page = accepted
             if await page.get_by_text(re.compile(r"too many|locked", re.I)).count():
                 raise LoginError("GitHub has temporarily locked 2FA attempts - wait and try later")
             return False                             # still on the 2FA page = rejected
 
-        await answer_challenge(submit, provider=provider)
+        await answer_challenge(submit, provider)
+
+    async def _click_skip_button(self, page: Page) -> bool:
+        for name in SKIP_BUTTONS:
+            for role in ("button", "link"):
+                target = page.get_by_role(role, name=name)
+                if await target.count() and await target.first.is_visible():
+                    await target.first.click()
+                    await page.wait_for_load_state("domcontentloaded")
+                    return True
+        return False
 
     async def _skip_interstitials(self, page: Page) -> None:
         """GitHub sometimes shows 'check your 2FA settings' or 'try passkeys' pages."""
         for _ in range(3):
             path = _path(page.url)
-            if not re.search(r"checkup|upsell|passkey|/sessions/|confirm", path):
+            if not INTERSTITIAL.search(path):
                 return
             log.info("Login: GitHub showed an extra page (%s) - skipping it", path)
-            for name in ("Remind me later", "Not now", "Skip for now", "Skip", "Done", "Continue"):
-                for role in ("button", "link"):
-                    target = page.get_by_role(role, name=name)
-                    if await target.count() and await target.first.is_visible():
-                        await target.first.click()
-                        await page.wait_for_load_state("domcontentloaded")
-                        break
-                else:
-                    continue
-                break
-            else:
+            if not await self._click_skip_button(page):
                 await page.goto(f"{BASE}/", wait_until="domcontentloaded")
-            await self._record(page, "full_login")
+            await self.manifest.visit(page, "full_login")
 
     async def _fail_on_captcha(self, page: Page) -> None:
-        captcha = page.locator("iframe[src*='captcha'], #captcha-container, [data-captcha]")
-        if await captcha.count():
+        if await page.locator(CAPTCHA).count():
             raise CaptchaError("GitHub is asking for a CAPTCHA - sign in once by hand in a "
                                "normal browser, wait a while, then run again")

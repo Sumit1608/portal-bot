@@ -17,18 +17,13 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+from bot.config import ROOT, load_settings
+from bot.secrets_scan import scan_path
+
 OUT = ROOT / "output"
 EVAL = OUT / "evaluation"
-PY = sys.executable
-
-sys.path.insert(0, str(ROOT))
-from dotenv import load_dotenv  # noqa: E402
-
-from bot.secrets_scan import load_secrets, scan_path  # noqa: E402
-
 EVIDENCE_FILES = {"screenshot.png", "page.html", "url.txt", "console.log", "evidence.json"}
-HEADLESS = False
+RUN_EXTRA_ARGS: list[str] = []          # ["--headless"] with --headless
 
 
 # ----------------------------------------------------------------- helpers
@@ -36,22 +31,20 @@ def sh(args: list[str], log_name: str) -> int:
     EVAL.mkdir(parents=True, exist_ok=True)
     print(f"    $ python {' '.join(args)}")
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
-    proc = subprocess.run([PY, *args], cwd=ROOT, capture_output=True, text=True,
+    proc = subprocess.run([sys.executable, *args], cwd=ROOT, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env)
     (EVAL / f"{log_name}.log").write_text(proc.stdout + proc.stderr, encoding="utf-8")
     return proc.returncode
 
 
-def run_bot(run_id: str, *args: str) -> tuple[int, dict | None]:
-    extra = ["--headless"] if HEADLESS else []
-    code = sh(["run.py", *args, "--run-id", run_id, *extra], run_id)
-    path = OUT / run_id / "manifest.json"
-    return code, json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
-
-
 def load_manifest(run_id: str) -> dict | None:
     path = OUT / run_id / "manifest.json"
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+def run_bot(run_id: str, *args: str) -> tuple[int, dict | None]:
+    code = sh(["run.py", *args, "--run-id", run_id, *RUN_EXTRA_ARGS], run_id)
+    return code, load_manifest(run_id)
 
 
 def hashes(m: dict) -> dict[str, str]:
@@ -183,7 +176,7 @@ def s6() -> Checks:
         ev = json.loads((folder / "evidence.json").read_text(encoding="utf-8"))
         c.add(ev.get("stage_key") and ev["resolver"]["failing_element_attempts"],
               f"stage key '{ev.get('stage_key')}' and resolver attempts recorded")
-    leaks = scan_path(folder, load_secrets()) if folder.exists() else [("missing", "")]
+    leaks = scan_path(folder, load_settings().secrets()) if folder.exists() else [("missing", "")]
     c.add(not leaks and m["evidence"] and m["evidence"]["secret_scan"] == "clean",
           "nothing sensitive in the bundle (password, 2FA key, username; plain/encoded)")
     return c
@@ -200,17 +193,16 @@ SCENARIOS = {
 
 
 def main() -> int:
-    global HEADLESS
     p = argparse.ArgumentParser(description="Run the evaluation scenarios")
     p.add_argument("--only", type=int, nargs="+", choices=SCENARIOS, help="scenario numbers to run")
     p.add_argument("--offline", action="store_true", help="only scenario 5 (no account needed)")
     p.add_argument("--headless", action="store_true", help="run the browser invisibly")
     args = p.parse_args()
-    HEADLESS = args.headless
-    load_dotenv(ROOT / ".env")
+    if args.headless:
+        RUN_EXTRA_ARGS.append("--headless")
 
     chosen = [5] if args.offline else (args.only or list(SCENARIOS))
-    if not args.offline and any(n != 5 for n in chosen) and not os.getenv("GITHUB_TOTP_SECRET"):
+    if not args.offline and any(n != 5 for n in chosen) and not load_settings().totp_secret:
         print("Scenarios 1-4 and 6 need a .env with GITHUB_USERNAME, GITHUB_PASSWORD and "
               "GITHUB_TOTP_SECRET. Use --offline for scenario 5 only.")
         return 2

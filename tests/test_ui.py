@@ -1,10 +1,14 @@
-"""Offline tests for the small web UI: served safely, and works in a real browser."""
+"""Offline tests for the small web UI: served safely, and works in a real browser.
+
+The page's strict CSP forbids eval, so the browser checks use Playwright's
+expect() assertions rather than wait_for_function() with a string."""
 import asyncio
+import re
 import threading
 import urllib.request
 
 import pytest
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, expect
 
 from bot.api import ApiServer
 from bot.jobs import JobQueue
@@ -54,23 +58,23 @@ def test_ui_queues_a_job_and_lists_it(server):
 
             await page.fill("#token", "wrong-token-0123456789")
             await page.click("#token-form button[type=submit]")
-            await page.wait_for_function("document.getElementById('status').textContent === 'Wrong token'")
+            await expect(page.locator("#status")).to_have_text("Wrong token")
 
             await page.fill("#token", TOKEN)
             await page.click("#token-form button[type=submit]")
-            await page.wait_for_function("document.getElementById('status').textContent.startsWith('Connected')")
+            await expect(page.locator("#status")).to_have_text(re.compile(r"^Connected"))
 
             await page.fill("input[name=base_repo]", "not a repo")       # server-side validation shows
             await page.fill("input[name=base_branch]", "main")
             await page.fill("input[name=head_branch]", "feature")
             await page.click("#job-form button[type=submit]")
-            await page.wait_for_function("document.getElementById('job-message').textContent.includes('owner/repository')")
+            await expect(page.locator("#job-message")).to_contain_text("owner/repository")
 
             await page.fill("input[name=base_repo]", "owner/repo")
             await page.fill("input[name=label]", "<img src=x onerror=alert(1)>")   # shown as text only
             await page.click("#job-form button[type=submit]")
-            await page.wait_for_function("document.getElementById('job-message').textContent.startsWith('Queued job')")
-            await page.wait_for_function("document.querySelectorAll('#jobs tr .pill.pending').length === 1")
+            await expect(page.locator("#job-message")).to_have_text(re.compile(r"^Queued job"))
+            await expect(page.locator("#jobs tr .pill.pending")).to_have_count(1)
             images = await page.locator("#jobs img").count()
             await browser.close()
             return errors, images

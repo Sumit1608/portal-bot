@@ -33,8 +33,12 @@ UI_FILES = {                                     # fixed list: no path from the 
     "/ui.css": ("ui.css", "text/css; charset=utf-8"),
 }
 # only this API's own files and calls; no inline code, no other sites, no framing
-UI_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
-          "img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+UI_HEADERS = {
+    "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+                               "img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
 
 
 class ApiServer(ThreadingHTTPServer):
@@ -57,15 +61,13 @@ class Handler(BaseHTTPRequestHandler):
 
     # ------------------------------------------------------------ routes
     def do_GET(self) -> None:
-        path = self.path.split("?", 1)[0].rstrip("/")
+        path = self._route()
         if path == "/health":
             return self._send(200, {"ok": True})
         if path in UI_FILES:                     # the page holds no data; its API calls need the token
             return self._send_file(*UI_FILES[path])
         if path == "/favicon.ico":               # browsers ask for it on their own: no icon, no 401 noise
-            self.send_response(204)
-            self.send_header("Content-Length", "0")
-            return self.end_headers()
+            return self._respond(204, b"", "image/x-icon")
         if not self._authorized():
             return
         q = self.server.queue
@@ -92,7 +94,7 @@ class Handler(BaseHTTPRequestHandler):
                               extra={"Connection": "close"})
         raw = self.rfile.read(length) if length > 0 else b""
 
-        path = self.path.split("?", 1)[0].rstrip("/")
+        path = self._route()
         if path != "/jobs":
             return self._send(404, {"error": "not found"})
         if not self._authorized():
@@ -111,7 +113,7 @@ class Handler(BaseHTTPRequestHandler):
         except InputError as e:
             return self._send(400, {"error": str(e)})
         log.info("API: queued job %s", job.id)
-        self._send(201, job.data, location=f"/jobs/{job.id}")
+        self._send(201, job.data, extra={"Location": f"/jobs/{job.id}"})
 
     def do_PUT(self) -> None:
         self._send(405, {"error": "method not allowed"})
@@ -119,6 +121,9 @@ class Handler(BaseHTTPRequestHandler):
     do_DELETE = do_PATCH = do_PUT
 
     # ------------------------------------------------------------ helpers
+    def _route(self) -> str:
+        return self.path.split("?", 1)[0].rstrip("/")
+
     def _discard(self, length: int) -> None:
         while length > 0:
             chunk = self.rfile.read(min(length, 65536))
@@ -135,32 +140,23 @@ class Handler(BaseHTTPRequestHandler):
                    extra={"WWW-Authenticate": "Bearer"})
         return False
 
-    def _send(self, status: int, payload: dict, location: str | None = None,
-              extra: dict | None = None) -> None:
-        body = json.dumps(payload, indent=2).encode("utf-8")
+    def _respond(self, status: int, body: bytes, content_type: str, headers: dict | None = None) -> None:
         self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        if location:
-            self.send_header("Location", location)
-        for name, value in (extra or {}).items():
+        for name, value in (headers or {}).items():
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
+    def _send(self, status: int, payload: dict, extra: dict | None = None) -> None:
+        self._respond(status, json.dumps(payload, indent=2).encode("utf-8"),
+                      "application/json; charset=utf-8", extra)
+
     def _send_file(self, name: str, content_type: str) -> None:
-        body = (UI_DIR / name).read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Security-Policy", UI_CSP)
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.end_headers()
-        self.wfile.write(body)
+        self._respond(200, (UI_DIR / name).read_bytes(), content_type, UI_HEADERS)
 
     def log_message(self, fmt: str, *args) -> None:
         # method, path and status only; headers (the token) are never logged
-        log.info("API: %s %s -> %s", self.command, self.path.split("?", 1)[0], args[1] if len(args) > 1 else "")
+        log.info("API: %s %s -> %s", self.command, self._route() or "/", args[1] if len(args) > 1 else "")

@@ -1,0 +1,44 @@
+23:25:24 error: [Report Only] This document requires 'TrustedScriptURL' assignment.
+23:25:24 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:25:25 error: Refused to load the script 'https://github.com/assets/opt-in.specrule-0a0e9d38bd18.json' because it violates the following Content Security Policy directive: "script-src 'nonce-/pMQAOourU0ps09n6gR7PAGXQR62mB3b' 'strict-dynamic' github.githubassets.com".
+
+23:25:25 warning: Load failed or canceled (net::ERR_ABORTED) for rule set requested from "https://github.com/assets/opt-in.specrule-0a0e9d38bd18.json" found in Speculation-Rules header.
+23:25:26 error: [Report Only] This document requires 'TrustedScriptURL' assignment.
+23:25:28 error: [Report Only] This document requires 'TrustedScriptURL' assignment.
+23:25:28 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:25:30 error: [Report Only] This document requires 'TrustedScriptURL' assignment.
+23:25:30 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:25:33 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:25:33 info: Autofocus processing was blocked because a document already has a focused element.
+23:25:34 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:25:34 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:25:34 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:25:34 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:25:55 error: Refused to load the script 'https://github.com/assets/opt-in.specrule-0a0e9d38bd18.json' because it violates the following Content Security Policy directive: "script-src 'nonce-5XuPL3ArNF9B+zHJspa4BcpyVsm2jGsT' 'strict-dynamic' github.githubassets.com".
+
+23:25:56 warning: Load failed or canceled (net::ERR_ABORTED) for rule set requested from "https://github.com/assets/opt-in.specrule-0a0e9d38bd18.json" found in Speculation-Rules header.
+23:25:57 error: [Report Only] This document requires 'TrustedScriptURL' assignment.
+23:25:58 error: [Report Only] This document requires 'TrustedScriptURL' assignment.
+23:25:58 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:26:00 error: [Report Only] This document requires 'TrustedScriptURL' assignment.
+23:26:00 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:26:03 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:26:03 info: Autofocus processing was blocked because a document already has a focused element.
+23:26:04 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:26:04 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:26:04 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:26:04 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:26:27 error: Refused to load the script 'https://github.com/assets/opt-in.specrule-0a0e9d38bd18.json' because it violates the following Content Security Policy directive: "script-src 'nonce-1ZJlytwImF21n2n5dk93tVhjBRAxsgMv' 'strict-dynamic' github.githubassets.com".
+
+23:26:27 warning: Load failed or canceled (net::ERR_ABORTED) for rule set requested from "https://github.com/assets/opt-in.specrule-0a0e9d38bd18.json" found in Speculation-Rules header.
+23:26:29 error: [Report Only] This document requires 'TrustedScriptURL' assignment.
+23:26:30 error: [Report Only] This document requires 'TrustedScriptURL' assignment.
+23:26:30 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:26:32 error: [Report Only] This document requires 'TrustedScriptURL' assignment.
+23:26:32 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:26:35 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:26:35 info: Autofocus processing was blocked because a document already has a focused element.
+23:26:36 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:26:36 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:26:36 error: [Report Only] This document requires 'TrustedHTML' assignment.
+23:26:36 error: [Report Only] This document requires 'TrustedHTML' assignment.

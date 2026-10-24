@@ -234,9 +234,12 @@ Safety:
 | `bot/resolver.py`, `bot/targets.py` | Multi-strategy locator resolver and every element's description |
 | `bot/compare_flow.py` | Navigation and the dependent Compare form |
 | `bot/documents.py` | Print to PDF and the `.patch` in a new tab |
-| `bot/retry.py`, `bot/evidence.py` | Retries with backoff; the redacted evidence bundle |
+| `bot/errors.py`, `bot/retry.py` | The two kinds of failure (final / retryable); retries with backoff |
+| `bot/evidence.py` | The redacted evidence bundle |
+| `bot/config.py` | The `.env` settings, and the list of values that must never be published |
 | `bot/filelock.py` | Lock shared between processes (saved login, queue worker) |
 | `bot/redact.py`, `bot/secrets_scan.py`, `bot/fixtures.py` | Redaction, leak scanning, cleaned page copies |
+| `bot/manifest.py`, `bot/log.py`, `bot/util.py` | The run manifest, redacted logging, small shared helpers |
 | `fixtures/` | Cleaned copies of GitHub's login, 2FA and compare pages (offline resolver check) |
 | `inputs/` | Input files |
 | `examples/` | One successful run and one failure bundle |
@@ -276,7 +279,7 @@ python -m pytest -q
 ## Setup checks
 
 ```bash
-python scripts/smoke_test.py   # opens a browser on the GitHub login page
+python evaluate.py --offline   # starts Chromium and runs the offline resolver check (no account needed)
 python scripts/check_totp.py   # confirms the 2FA secret in .env matches your app
 ```
 
@@ -284,7 +287,8 @@ python scripts/check_totp.py   # confirms the 2FA secret in .env matches your ap
 
 ### Second factor: how the code arrives, and what happens when it is wrong
 
-The login flow only calls `await get_code(challenge)` (`bot/code_provider.py`).
+The login flow only talks to a code provider: `await provider.get_code(challenge)`
+(`bot/code_provider.py`).
 The implementation is **TOTP**: the authenticator-app setup key in
 `GITHUB_TOTP_SECRET` generates the same 6-digit code as the phone, from the
 current time, so no human types anything. Other providers (email/IMAP, SMS
@@ -398,7 +402,9 @@ manifest, so two runs can be compared.
 
 ### Retries: which failures retry
 
-The run has three steps, each retried as a unit: **login**, **form**
+Every error the bot raises derives from `FinalError` or `RetryableError`
+(`bot/errors.py`); Playwright errors and timeouts count as retryable, anything
+unexpected as final. The run has three steps, each retried as a unit: **login**, **form**
 (navigation and filling; a retry starts again from the repository page) and
 **capture_document**. A retryable failure is retried up to `MAX_ATTEMPTS`
 times (default 3) with exponential backoff and jitter: about 2s, then 4s, then

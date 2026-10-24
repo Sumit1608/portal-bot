@@ -1,29 +1,16 @@
 """Find sensitive values in files: plain, URL-encoded or base64-encoded.
 
-Used by scripts/check_no_secrets.py and automatically on every evidence bundle.
-Reports only where something was found, never the value.
+Used by scripts/check_no_secrets.py, scripts/make_examples.py and on every
+evidence bundle. Reports only where something was found, never the value.
 """
 import base64
 import binascii
-import os
 import re
 from pathlib import Path
 from urllib.parse import quote
 
 B64 = re.compile(r"[A-Za-z0-9+/]{8,}={0,2}")
 BINARY = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".zip"}
-
-
-def load_secrets() -> dict[str, str]:
-    """Values from the environment (.env must already be loaded)."""
-    found = {
-        "password": os.getenv("GITHUB_PASSWORD", ""),
-        "2FA setup key": (os.getenv("GITHUB_TOTP_SECRET", "") or "").replace(" ", ""),
-        "username": os.getenv("GITHUB_USERNAME", ""),
-    }
-    for i, extra in enumerate(os.getenv("REDACT_EXTRA", "").split(",")):
-        found[f"REDACT_EXTRA #{i + 1}"] = extra.strip()
-    return {k: v for k, v in found.items() if len(v) >= 3}
 
 
 def _decoded_base64(text: str) -> str:

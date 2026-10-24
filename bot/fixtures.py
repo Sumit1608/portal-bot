@@ -8,15 +8,13 @@ sensitive or live:
 Elements that were invisible on the live page are marked display:none, so
 the offline copy is visible/hidden in the same places as the real page.
 """
-import base64
-import binascii
 import logging
-import re
 from pathlib import Path
 
 from playwright.async_api import Page
 
-from .redact import REDACTOR
+from .redact import clean
+from .util import without_query
 
 log = logging.getLogger("bot.fixtures")
 
@@ -65,34 +63,8 @@ SANITIZE_JS = r"""
 """
 
 
-B64_VALUE = re.compile(r'(?<==")[A-Za-z0-9+/]{8,}={0,2}(?=")')
-
-
-def mask_identifiers(text: str, identifiers: list[str]) -> str:
-    """Replace account identifiers, including base64-encoded copies of them
-    (GitHub stores e.g. 'owner/repo' base64-encoded in some attributes)."""
-    idents = [i for i in identifiers if i and len(i) >= 3]
-
-    def fix_b64(match: re.Match) -> str:
-        raw = match.group(0)
-        try:
-            decoded = base64.b64decode(raw, validate=True).decode("utf-8")
-        except (binascii.Error, UnicodeDecodeError, ValueError):
-            return raw
-        cleaned = decoded
-        for ident in idents:
-            cleaned = re.sub(re.escape(ident), "octo-user", cleaned, flags=re.IGNORECASE)
-        return raw if cleaned == decoded else base64.b64encode(cleaned.encode()).decode()
-
-    text = B64_VALUE.sub(fix_b64, text)
-    for ident in idents:
-        text = re.sub(re.escape(ident), "octo-user", text, flags=re.IGNORECASE)
-    return text
-
-
 async def save_fixture(page: Page, path: Path, identifiers: list[str]) -> None:
-    html = await page.evaluate(SANITIZE_JS)
-    html = mask_identifiers(REDACTOR.scrub(html), identifiers)
+    html = clean(await page.evaluate(SANITIZE_JS), identifiers)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(html, encoding="utf-8")
-    log.info("Fixture: saved cleaned copy of %s as %s", re.sub(r"\?.*", "", page.url), path.name)
+    log.info("Fixture: saved cleaned copy of %s as %s", without_query(page.url), path.name)

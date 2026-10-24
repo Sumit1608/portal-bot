@@ -1,0 +1,201 @@
+{
+  "captured_at": "2026-10-24T17:56:55+00:00",
+  "stage_key": "fill_form",
+  "step": "form",
+  "error_type": "ResolveError",
+  "error": "Could not find 'compare.base_branch' (role=not found, label=not found, structure=not found, id_or_class=not found)",
+  "retryable": true,
+  "attempts_made": 3,
+  "outcome": "retries exhausted",
+  "retries": [
+    {
+      "step": "form",
+      "attempt": 1,
+      "error_type": "ResolveError",
+      "error": "Could not find 'compare.base_branch' (role=not found, label=not found, structure=not found, id_or_class=not found)",
+      "retryable": true,
+      "retry_in_seconds": 2.2
+    },
+    {
+      "step": "form",
+      "attempt": 2,
+      "error_type": "ResolveError",
+      "error": "Could not find 'compare.base_branch' (role=not found, label=not found, structure=not found, id_or_class=not found)",
+      "retryable": true,
+      "retry_in_seconds": 4.0
+    },
+    {
+      "step": "form",
+      "attempt": 3,
+      "error_type": "ResolveError",
+      "error": "Could not find 'compare.base_branch' (role=not found, label=not found, structure=not found, id_or_class=not found)",
+      "retryable": true
+    }
+  ],
+  "url": "https://github.com/[REDACTED]/portal-bot/compare/[REDACTED]:portal-bot:main...main",
+  "resolver": {
+    "failing_element": "compare.base_branch",
+    "failing_element_attempts": [
+      {
+        "strategy": "role",
+        "query": "role=button name='this button does not exist (--break-step)'",
+        "matches": 0,
+        "result": "not found"
+      },
+      {
+        "strategy": "label",
+        "query": "label='no such label'",
+        "matches": 0,
+        "result": "not found"
+      },
+      {
+        "strategy": "structure",
+        "query": "summary[data-broken-on-purpose]",
+        "matches": 0,
+        "result": "not found"
+      },
+      {
+        "strategy": "id_or_class",
+        "query": "#broken-on-purpose",
+        "matches": 0,
+        "result": "not found"
+      }
+    ],
+    "winning_strategies": {
+      "repo.pulls_tab": "role",
+      "pulls.new": "role",
+      "compare.across_forks": "role",
+      "compare.head_repo": "role",
+      "compare.base_repo": "role",
+      "compare.picker_filter": "structure",
+      "compare.repo_option[[REDACTED]/portal-bot]": "structure"
+    },
+    "all_attempts": {
+      "repo.pulls_tab": [
+        {
+          "strategy": "role",
+          "query": "role=link name=/^\\s*Pull requests/",
+          "matches": 1,
+          "result": "unique"
+        }
+      ],
+      "pulls.new": [
+        {
+          "strategy": "role",
+          "query": "role=link name='New pull request'",
+          "matches": 1,
+          "result": "unique"
+        }
+      ],
+      "compare.head_repo": [
+        {
+          "strategy": "role",
+          "query": "role=button name=/^\\s*head repository\\s*:/",
+          "matches": 1,
+          "result": "unique"
+        }
+      ],
+      "compare.across_forks": [
+        {
+          "strategy": "role",
+          "query": "role=link name=/compare across forks/",
+          "matches": 0,
+          "result": "not found"
+        },
+        {
+          "strategy": "role",
+          "query": "role=button name=/compare across forks/",
+          "matches": 1,
+          "result": "unique"
+        }
+      ],
+      "compare.base_repo": [
+        {
+          "strategy": "role",
+          "query": "role=button name=/^\\s*base repository\\s*:/",
+          "matches": 1,
+          "result": "unique"
+        }
+      ],
+      "compare.picker_filter": [
+        {
+          "strategy": "role",
+          "query": "role=textbox name=/find a branch|filter|find a repository|search/",
+          "matches": 0,
+          "result": "not found"
+        },
+        {
+          "strategy": "role",
+          "query": "role=combobox name=/find a branch|filter|find a repository|search/",
+          "matches": 0,
+          "result": "not found"
+        },
+        {
+          "strategy": "role",
+          "query": "role=searchbox name=/find a branch|filter|find a repository|search/",
+          "matches": 0,
+          "result": "not found"
+        },
+        {
+          "strategy": "structure",
+          "query": "details[open] input[type='text']",
+          "matches": 1,
+          "result": "unique"
+        }
+      ],
+      "compare.repo_option[[REDACTED]/portal-bot]": [
+        {
+          "strategy": "role",
+          "query": "role=menuitemradio name=/^\\s*[REDACTED]/portal\\-bot(\\s|$)/",
+          "matches": 0,
+          "result": "not found"
+        },
+        {
+          "strategy": "role",
+          "query": "role=menuitem name=/^\\s*[REDACTED]/portal\\-bot(\\s|$)/",
+          "matches": 0,
+          "result": "not found"
+        },
+        {
+          "strategy": "role",
+          "query": "role=option name=/^\\s*[REDACTED]/portal\\-bot(\\s|$)/",
+          "matches": 0,
+          "result": "not found"
+        },
+        {
+          "strategy": "structure",
+          "query": "details[open] [role^=\"menuitem\"]:has-text(\"[REDACTED]/portal-bot\")",
+          "matches": 1,
+          "result": "unique"
+        }
+      ],
+      "compare.base_branch": [
+        {
+          "strategy": "role",
+          "query": "role=button name='this button does not exist (--break-step)'",
+          "matches": 0,
+          "result": "not found"
+        },
+        {
+          "strategy": "label",
+          "query": "label='no such label'",
+          "matches": 0,
+          "result": "not found"
+        },
+        {
+          "strategy": "structure",
+          "query": "summary[data-broken-on-purpose]",
+          "matches": 0,
+          "result": "not found"
+        },
+        {
+          "strategy": "id_or_class",
+          "query": "#broken-on-purpose",
+          "matches": 0,
+          "result": "not found"
+        }
+      ]
+    }
+  },
+  "problems_writing_evidence": []
+}

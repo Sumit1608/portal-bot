@@ -1,6 +1,7 @@
 """Offline tests for document helpers."""
-from bot.documents import compare_url, normalize_pdf, without_query
+from bot.documents import compare_url, normalize_pdf
 from bot.inputs import RunInputs
+from bot.util import without_query
 
 
 def inputs(head_repo="me/repo", head_branch="feature/x"):
