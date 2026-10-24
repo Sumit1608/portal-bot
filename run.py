@@ -5,7 +5,8 @@
 Current version: loads inputs, signs in to GitHub (reusing the saved session
 when it is still alive, otherwise a full login with 2FA), clicks through
 repository -> Pull requests -> New pull request, fills the 4-field Compare
-form, and writes the manifest and a redacted run.log.
+form, saves the comparison as a PDF (print) and a .patch (new tab), and
+writes the manifest and a redacted run.log.
 """
 import argparse
 import asyncio
@@ -19,6 +20,7 @@ from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
 from bot.compare_flow import CompareForm
+from bot.documents import capture_documents
 from bot.github_login import GitHubAuth
 from bot.inputs import InputError, load_inputs
 from bot.log import setup_logging
@@ -88,6 +90,8 @@ async def main() -> int:
                                    capture_dir=capture, identifiers=[username])
                 await form.navigate(inputs.base_repo)
                 await form.fill(inputs)
+                await capture_documents(p, browser, context, page, inputs, manifest,
+                                        out_dir, args.headless)
             finally:
                 await browser.close()
         status = "success"
@@ -102,6 +106,8 @@ async def main() -> int:
     how = "reused saved session" if s["reused"] else f"full login ({s['dead_session_reason']})"
     log.info("Run %s in %.1fs - %s - manifest: %s",
              status.upper(), manifest.data["total_seconds"], how, path.relative_to(ROOT))
+    for f in manifest.data["captured_files"]:
+        log.info("  document: %s (%d bytes, sha256 %s...)", f["path"], f["bytes"], f["sha256"][:12])
     return 0 if status == "success" else 1
 
 

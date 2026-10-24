@@ -62,7 +62,9 @@ To get a different document, change the branches in the JSON file or point
 ## Output
 
 Each run writes to `output/<run-id>/`:
-- `manifest.json`: inputs, pages visited, stage timings, captured files (size and SHA-256)
+- `documents/<label>.pdf`: the comparison page printed to PDF
+- `documents/<label>.patch`: the same comparison as a git patch, opened in a new tab
+- `manifest.json`: inputs, pages visited, stage timings, form values, captured files (size and SHA-256)
 - `run.log`: the run's log, with the password, 2FA secret and every 2FA code masked as `[REDACTED]`
 
 ## Offline tests
@@ -160,6 +162,39 @@ offered. If it is not (a typo, or a branch that exists only in the other
 repository), the run stops with a clear input error rather than picking
 something else. After filling, every field is read back and compared with the
 input, and the values are written to the manifest under `form`.
+
+### Document capture
+
+After the form is filled, GitHub shows the comparison of the two branches.
+The bot saves it in two ways:
+
+1. **Print to PDF:** the comparison page is printed to
+   `documents/<label>.pdf`. Chromium can only print in headless mode, so in a
+   visible run a second, invisible browser is given the same signed-in session
+   and prints the page.
+2. **New tab:** the same comparison is opened as a `.patch` in a second tab of
+   the signed-in browser and saved as `documents/<label>.patch`; then the tab is
+   closed and the original tab brought back to the front.
+
+The run is repeatable: the same input gives the same document. Relative times
+such as "2 hours ago" are replaced with fixed dates before printing, and the
+PDF's internal timestamps are zeroed. The `.patch` is byte-for-byte identical
+for the same branches. Sizes and SHA-256 hashes of both files are in the
+manifest, so two runs can be compared.
+
+### Portal quirks handled
+
+| Quirk | Where | How it is handled |
+|---|---|---|
+| **Dependent field** | Compare form | Each branch list reloads for the chosen repository; the bot waits for it and accepts only a branch that is really offered |
+| **Print to PDF** | Document | Printed by a headless browser that shares the signed-in session |
+| **New tab** | Document | The `.patch` opens in a second tab of the same session, which is then closed |
+| **Iframes** | Resolver | Every search covers the main page and all iframes (proven offline by the `inside_iframe` mutation) |
+| Ignored clicks while a page is still loading | Navigation | Click again after the page settles, then follow the link's address directly |
+| Dropdown overlay blocking clicks | Compare form | Close any open menu before the next click, and wait until the form settles |
+| Fields folded away after each reload | Compare form | "Compare across forks" is switched on again before reading a repository field |
+| Extra pages after login (2FA check-up, passkey offers) | Login | Recognised and skipped |
+| Computer clock out of sync | 2FA | Code timing corrected using GitHub's clock |
 
 ### Locator strategy: order and why
 
