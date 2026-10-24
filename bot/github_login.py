@@ -7,20 +7,24 @@ Flow of GitHubAuth.open():
   3. If anything fails: fresh browser context, full login (password, then the
      authenticator code from bot/code_provider.py), probe again, save session.
 
-Note: the element lookups here use short lists of alternatives. Step 5
-replaces them with the multi-strategy locator resolver.
+Every element is found through the multi-strategy resolver (bot/resolver.py)
+using the targets in bot/targets.py - never one fixed selector.
 """
 import logging
 import re
 import time
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 from urllib.parse import urlsplit
 
-from playwright.async_api import Browser, BrowserContext, Locator, Page
+from playwright.async_api import Browser, BrowserContext, Page
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
+from . import targets
 from .code_provider import answer_challenge, provider_from_env
+from .fixtures import save_fixture
+from .resolver import ResolveError, Resolver
 from .session import SessionStore
 
 log = logging.getLogger("bot.login")
@@ -58,27 +62,25 @@ def _clock_offset(response) -> float:
     return offset if abs(offset) > 2 else 0.0
 
 
-async def _first_visible(page: Page, candidates: list[Locator], what: str,
-                         timeout: float = 10.0) -> Locator:
-    deadline = time.monotonic() + timeout
-    while True:
-        for locator in candidates:
-            try:
-                if await locator.first.is_visible():
-                    return locator.first
-            except PlaywrightError:
-                pass
-        if time.monotonic() > deadline:
-            raise LoginError(f"Could not find the {what} on {_path(page.url)}")
-        await page.wait_for_timeout(250)
-
-
 class GitHubAuth:
-    def __init__(self, username: str, password: str, store: SessionStore, manifest):
+    def __init__(self, username: str, password: str, store: SessionStore, manifest,
+                 resolver: Resolver | None = None, capture_dir: Path | None = None):
         self.username = username
         self.password = password
         self.store = store
         self.manifest = manifest
+        self.resolver = resolver or Resolver()
+        self.capture_dir = capture_dir      # set by --capture-fixtures
+
+    async def _find(self, page: Page, target, timeout: float = 15.0):
+        try:
+            return await self.resolver.find(page, target, timeout=timeout)
+        except ResolveError as e:
+            raise LoginError(str(e)) from e
+
+    async def _capture(self, page: Page, name: str) -> None:
+        if self.capture_dir:
+            await save_fixture(page, self.capture_dir / name, [self.username])
 
     async def _record(self, page: Page, stage: str) -> None:
         try:
@@ -162,25 +164,11 @@ class GitHubAuth:
         offset = _clock_offset(response)
         await self._fail_on_captcha(page)
 
-        user_box = await _first_visible(page, [
-            page.get_by_label("Username or email address"),
-            page.locator("#login_field"),
-            page.locator("input[name='login']"),
-        ], "username field")
+        user_box = await self._find(page, targets.LOGIN_USERNAME)
+        await self._capture(page, "github_login.html")
         await user_box.fill(self.username)
-
-        password_box = await _first_visible(page, [
-            page.get_by_label("Password", exact=True),
-            page.locator("#password"),
-            page.locator("input[type='password']"),
-        ], "password field")
-        await password_box.fill(self.password)
-
-        sign_in = await _first_visible(page, [
-            page.get_by_role("button", name="Sign in", exact=True),
-            page.locator("input[name='commit']"),
-        ], "Sign in button")
-        await sign_in.click()
+        await (await self._find(page, targets.LOGIN_PASSWORD)).fill(self.password)
+        await (await self._find(page, targets.LOGIN_SUBMIT)).click()
 
         try:
             await page.wait_for_url(lambda u: _path(u) not in LOGIN_PATHS, timeout=20_000)
@@ -201,21 +189,19 @@ class GitHubAuth:
             await self._record(page, "full_login")
         provider = provider_from_env(clock_offset=clock_offset)
 
+        captured = False
+
         async def submit(code: str) -> bool:
-            box = await _first_visible(page, [
-                page.get_by_label("Authentication code"),
-                page.locator("#app_totp"),
-                page.locator("input[name='app_otp']"),
-                page.locator("input[autocomplete='one-time-code']"),
-            ], "authentication code field")
+            nonlocal captured
+            box = await self._find(page, targets.TOTP_CODE)
+            if not captured:
+                await self._capture(page, "github_2fa.html")
+                captured = True
             try:
                 async with page.expect_navigation(wait_until="domcontentloaded", timeout=8_000):
                     await box.fill(code)            # GitHub submits by itself after 6 digits
             except PlaywrightTimeout:
-                verify = await _first_visible(page, [
-                    page.get_by_role("button", name="Verify"),
-                    page.locator("button[type='submit']"),
-                ], "Verify button")
+                verify = await self._find(page, targets.TOTP_VERIFY, timeout=5)
                 async with page.expect_navigation(wait_until="domcontentloaded", timeout=20_000):
                     await verify.click()
             await self._record(page, "full_login")

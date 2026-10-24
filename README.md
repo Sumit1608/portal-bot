@@ -33,6 +33,7 @@ python run.py --input inputs/example.json
 |---|---|
 | `--fresh` | Delete the saved session first, forcing a full login |
 | `--headless` | Run without a visible browser window |
+| `--capture-fixtures` | Full login that also saves cleaned copies of the login and 2FA pages to `fixtures/` |
 
 ## Environment variables (`.env`)
 
@@ -41,6 +42,7 @@ python run.py --input inputs/example.json
 | `GITHUB_USERNAME` | yes | Your GitHub username |
 | `GITHUB_PASSWORD` | yes | Your GitHub password |
 | `GITHUB_TOTP_SECRET` | yes | The 2FA "setup key" shown when enabling authenticator-app 2FA |
+| `REDACT_EXTRA` | no | Extra words to mask in logs and saved pages, comma-separated (e.g. your display name, email) |
 
 `.env` is ignored by Git and never committed.
 
@@ -136,6 +138,54 @@ python run.py --input inputs/example.json            # reuses the session, faste
 python scripts/corrupt_session.py                     # scramble the saved cookies
 python run.py --input inputs/example.json            # dead session detected, full login
 ```
+
+### Locator strategy: order and why
+
+No step depends on a single CSS or XPath string. Every element is described
+once in `bot/targets.py` with several independent descriptions, and the
+resolver (`bot/resolver.py`) tries them in this order, accepting the first
+that matches **exactly one visible element**:
+
+| # | Strategy | Example | Why this position |
+|---|---|---|---|
+| 1 | Role and accessible name | textbox named "Username or email address" | What users and screen readers see. Survives any markup or styling change, and portals keep it stable for accessibility |
+| 2 | Label | the `<label>` "Password" | Visible wording, tied to the field by the page itself |
+| 3 | Nearby text | the first control after the text "Authentication code" | Still works if the label link is broken, as long as the wording stays |
+| 4 | Structure | `form[action$='/session'] input[type='password']` | Uses what the form *does* (its action, input type, field name) rather than how it looks; no ids or classes |
+| 5 | Id or class | `#login_field` | Most precise but most fragile (renamed in redesigns), so last |
+
+Other rules:
+- A strategy matching several visible elements counts as **ambiguous** and is
+  skipped: clicking the wrong thing is worse than trying the next strategy.
+- The main page **and every iframe** are searched.
+- The winning strategy is logged (`Resolver: login.password found by label [...]`).
+- Every attempt (strategy, query, matches) is kept for the failure evidence bundle.
+
+**Offline check (evaluation scenario 5).** `fixtures/` holds cleaned copies of
+GitHub's real login and 2FA pages (no tokens, values, scripts or account
+names; elements hidden on the live page are kept hidden). This command
+mutates each page and runs the resolver on every copy with the network
+switched off:
+
+```bash
+python scripts/resolver_offline.py
+```
+
+| Mutation | What changes |
+|---|---|
+| `renamed_classes` | Every CSS class renamed |
+| `renamed_ids` | Every id renamed (label links updated, as a real redesign would) |
+| `reordered_siblings` | Elements inside forms in reverse order |
+| `wrapper_divs` | An extra `<div>` around every form and control |
+| `inside_iframe` | The whole page moved into an iframe |
+| `all_combined` | All of the above at once |
+
+The table shows which strategy found each element in each copy. Mutated pages
+are written to `output/resolver-offline/` for inspection. The same check runs
+in `python -m pytest`.
+
+To refresh the saved pages from the live site:
+`python run.py --input inputs/example.json --capture-fixtures`
 
 ## Troubleshooting
 

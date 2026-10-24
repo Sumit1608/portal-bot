@@ -33,6 +33,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--input", required=True, help="path to the input JSON file")
     p.add_argument("--headless", action="store_true", help="run without a visible browser window")
     p.add_argument("--fresh", action="store_true", help="delete the saved session first (forces a full login)")
+    p.add_argument("--capture-fixtures", action="store_true",
+                   help="save cleaned copies of the login and 2FA pages to fixtures/ (implies --fresh)")
     return p.parse_args()
 
 
@@ -55,6 +57,8 @@ async def main() -> int:
         return 2
     for value in (password, os.getenv("GITHUB_TOTP_SECRET")):   # never let these reach a log
         REDACTOR.add(value)
+    for value in os.getenv("REDACT_EXTRA", "").split(","):     # e.g. your display name, email
+        REDACTOR.add(value.strip())
 
     run_id = f"{datetime.now():%Y%m%d-%H%M%S}-{inputs.label}"
     out_dir = ROOT / "output" / run_id
@@ -64,7 +68,7 @@ async def main() -> int:
     log.info("Run %s started with %s", run_id, args.input)
 
     store = SessionStore(STATE_FILE)
-    if args.fresh:
+    if args.fresh or args.capture_fixtures:
         store.clear()
 
     status, error = "failed", None
@@ -73,7 +77,8 @@ async def main() -> int:
             with manifest.stage("launch_browser"):
                 browser = await p.chromium.launch(headless=args.headless)
             try:
-                auth = GitHubAuth(username, password, store, manifest)
+                capture = ROOT / "fixtures" if args.capture_fixtures else None
+                auth = GitHubAuth(username, password, store, manifest, capture_dir=capture)
                 context, page = await auth.open(browser)
                 context.set_default_timeout(20_000)
 
