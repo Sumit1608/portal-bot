@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>portal-bot</title>
+  <link rel="stylesheet" href="/ui.css">
+  <script src="/ui.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="9" class="logo-bg"/>
+        <path d="M10 11.5h6.5a4 4 0 0 1 0 8H13v3.5" class="logo-mark"/>
+        <circle cx="22" cy="22" r="2.2" class="logo-dot"/>
+      </svg>
+      <div>
+        <div class="brand-name">portal-bot</div>
+        <div class="brand-sub">GitHub compare jobs</div>
+      </div>
+    </div>
+    <div class="status-chip" id="status-chip" data-state="off">
+      <span class="dot" aria-hidden="true"></span>
+      <span id="status">Not connected</span>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="card connect" id="connect-card">
+      <div class="connect-text">
+        <h2>Connect</h2>
+        <p class="muted">Paste the <code>API_TOKEN</code> from your <code>.env</code>. It stays in this tab only.</p>
+      </div>
+      <form id="token-form" class="token-row" autocomplete="off">
+        <input id="token" type="password" placeholder="API token" aria-label="API token">
+        <button type="submit" class="btn primary">Connect</button>
+      </form>
+      <div class="connected-row">
+        <span class="muted">Token saved for this tab.</span>
+        <button type="button" id="forget" class="btn ghost">Forget token</button>
+      </div>
+    </section>
+
+    <section class="stats" aria-label="Job counts">
+      <div class="stat" data-kind="pending"><span class="stat-label">Pending</span><span class="stat-value" id="n-pending">–</span></div>
+      <div class="stat" data-kind="running"><span class="stat-label">Running</span><span class="stat-value" id="n-running">–</span></div>
+      <div class="stat" data-kind="done"><span class="stat-label">Done</span><span class="stat-value" id="n-done">–</span></div>
+      <div class="stat" data-kind="failed"><span class="stat-label">Failed</span><span class="stat-value" id="n-failed">–</span></div>
+    </section>
+
+    <div class="columns">
+      <section class="card">
+        <h2>New comparison</h2>
+        <p class="muted small-gap">The worker signs in, fills GitHub's Compare form and saves a PDF and a patch.</p>
+        <form id="job-form">
+          <fieldset>
+            <legend>Base</legend>
+            <label><span>Repository</span><input name="base_repo" placeholder="owner/repo" required spellcheck="false"></label>
+            <label><span>Branch</span><input name="base_branch" placeholder="main" required spellcheck="false"></label>
+          </fieldset>
+          <div class="arrow" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+            <span>compared with</span>
+          </div>
+          <fieldset>
+            <legend>Compare</legend>
+            <label><span>Repository <em>optional</em></span><input name="head_repo" placeholder="same as base" spellcheck="false"></label>
+            <label><span>Branch</span><input name="head_branch" placeholder="feature-branch" required spellcheck="false"></label>
+          </fieldset>
+          <label><span>Label <em>optional</em></span><input name="label" placeholder="short name for the files" spellcheck="false"></label>
+          <button type="submit" class="btn primary wide">Add to queue</button>
+        </form>
+        <p id="job-message" class="message" role="status"></p>
+      </section>
+
+      <section class="card jobs-card">
+        <div class="jobs-head">
+          <h2>Jobs</h2>
+          <div class="filters" role="tablist" aria-label="Filter jobs">
+            <button type="button" class="filter active" data-filter="all">All</button>
+            <button type="button" class="filter" data-filter="active">Active</button>
+            <button type="button" class="filter" data-filter="done">Done</button>
+            <button type="button" class="filter" data-filter="failed">Failed</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Status</th><th>Job</th><th>Added</th><th>Took</th><th>Result</th></tr></thead>
+            <tbody id="jobs"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="empty">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+          <p id="empty-text">Connect with your token to see jobs.</p>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

@@ -4,20 +4,18 @@ The key and the generated code are never printed. You type the code from
 your phone (hidden as you type) and the script only says MATCH or NO MATCH.
 """
 import getpass
-import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import pyotp
-from dotenv import load_dotenv
+import pyotp  # noqa: E402
 
-from bot.totp_secret import SecretError, normalize_totp_secret
+from bot.config import load_settings  # noqa: E402
+from bot.totp_secret import SecretError, normalize_totp_secret  # noqa: E402
 
-load_dotenv()
 try:
-    secret = normalize_totp_secret(os.getenv("GITHUB_TOTP_SECRET"))
+    secret = normalize_totp_secret(load_settings().totp_secret)
 except SecretError as e:
     sys.exit(f"Problem with GITHUB_TOTP_SECRET: {e}")
 

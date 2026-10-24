@@ -21,19 +21,28 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
-from urllib.parse import quote, urlsplit, urlunsplit
+from typing import TYPE_CHECKING, Callable
+from urllib.parse import quote
+
+from playwright.async_api import Error as PlaywrightError
 
 from . import faults
+from .errors import RetryableError
+from .resolver import visible_indexes
+from .util import without_query
 
 if TYPE_CHECKING:
-    from playwright.async_api import Browser, BrowserContext, Page, Playwright
+    from playwright.async_api import Browser, BrowserContext, Page
+
+    from .inputs import RunInputs
+    from .manifest import Manifest
 
 log = logging.getLogger("bot.documents")
 
 LOADED = re.compile(r"Showing\s+\d+\s+changed\s+files?|\d+\s+files?\s+changed", re.I)
 NOTHING = re.compile(r"There isn.t anything to compare", re.I)
 PDF_DATE = re.compile(rb"/(CreationDate|ModDate)\s*\(D:(\d{4,14})")
+MIN_PDF_BYTES = 5_000
 
 FIX_TIMES_JS = """() => {
   document.querySelectorAll('relative-time, time-ago, local-time, time').forEach(el => {
@@ -45,11 +54,11 @@ FIX_TIMES_JS = """() => {
 }"""
 
 
-class DocumentError(RuntimeError):
-    """The portal did not produce a usable document. Can be retried."""
+class DocumentError(RetryableError):
+    """The portal did not produce a usable document."""
 
 
-def compare_url(inputs) -> str:
+def compare_url(inputs: RunInputs) -> str:
     """The comparison address built from the inputs (used if the form's own address can't be used)."""
     base = quote(inputs.base_branch, safe="/")
     head = quote(inputs.head_branch, safe="/")
@@ -59,40 +68,72 @@ def compare_url(inputs) -> str:
     return f"https://github.com/{inputs.base_repo}/compare/{base}...{head}"
 
 
-def without_query(url: str) -> str:
-    p = urlsplit(url)
-    return urlunsplit((p.scheme, p.netloc, p.path, "", ""))
-
-
 def normalize_pdf(path: Path) -> None:
     """Zero the creation/modification dates (same length, so the PDF stays valid)."""
     data = path.read_bytes()
-    fixed = PDF_DATE.sub(lambda m: m.group(0)[: -len(m.group(2))] + b"0" * len(m.group(2)), data)
-    path.write_bytes(fixed)
+    path.write_bytes(PDF_DATE.sub(lambda m: m.group(0)[: -len(m.group(2))] + b"0" * len(m.group(2)), data))
 
 
 async def wait_for_comparison(page: Page, timeout: float = 30) -> str:
+    """'diff' when the changed files are shown, 'nothing' when the branches are equal."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         for pattern, result in ((LOADED, "diff"), (NOTHING, "nothing")):
-            matches = page.get_by_text(pattern)
-            for i in range(min(await matches.count(), 5)):
-                if await matches.nth(i).is_visible():
-                    return result
+            if await visible_indexes(page.get_by_text(pattern), limit=5):
+                return result
         await page.wait_for_timeout(300)
     raise DocumentError("The comparison did not finish loading")
 
 
-async def _settle(page: Page) -> None:
+async def _print_pdf(browser: Browser, state: dict, source: str, path: Path, headless: bool,
+                     on_context: Callable) -> str:
+    printer_browser = browser if headless else await browser.browser_type.launch(headless=True)
     try:
-        await page.wait_for_load_state("networkidle", timeout=10_000)
-    except Exception:
-        pass        # some pages keep a connection open; the content is already there
+        printer = await printer_browser.new_context(storage_state=state, viewport={"width": 1280, "height": 900})
+        on_context(printer)
+        page = await printer.new_page()
+        await page.goto(source, wait_until="domcontentloaded")
+        outcome = await wait_for_comparison(page)
+        if outcome == "nothing":
+            log.warning("Document: GitHub says there is nothing to compare for these branches")
+        try:
+            await page.wait_for_load_state("networkidle", timeout=10_000)
+        except PlaywrightError:
+            pass        # some pages keep a connection open; the content is already there
+        await page.evaluate(FIX_TIMES_JS)
+        await page.emulate_media(media="screen")
+        await page.pdf(path=str(path), format="A4", print_background=True,
+                       margin={"top": "12mm", "bottom": "12mm", "left": "10mm", "right": "10mm"})
+        await printer.close()
+    finally:
+        if printer_browser is not browser:
+            await printer_browser.close()
+
+    normalize_pdf(path)
+    if path.stat().st_size < MIN_PDF_BYTES or not path.read_bytes().startswith(b"%PDF"):
+        raise DocumentError("The printed PDF is empty or invalid")
+    return outcome
 
 
-async def capture_documents(playwright: Playwright, browser: Browser, context: BrowserContext,
-                            page: Page, inputs, manifest, out_dir: Path, headless: bool,
-                            on_context=None) -> None:
+async def _fetch_patch(context: BrowserContext, page: Page, source: str, inputs: RunInputs,
+                       manifest: Manifest) -> bytes:
+    tab = await context.new_page()
+    try:
+        for patch_url in (source + ".patch", compare_url(inputs) + ".patch"):
+            response = await tab.goto(patch_url, wait_until="domcontentloaded")
+            if response is not None and response.ok:
+                manifest.page_visited(patch_url, "comparison as patch (new tab)", "capture_document")
+                return await response.body()
+        code = response.status if response else "no response"
+        raise DocumentError(f"GitHub did not return the patch (HTTP {code})")
+    finally:
+        await tab.close()
+        await page.bring_to_front()
+
+
+async def capture_documents(browser: Browser, context: BrowserContext, page: Page, inputs: RunInputs,
+                            manifest: Manifest, out_dir: Path, headless: bool,
+                            on_context: Callable = lambda context: None) -> None:
     docs = out_dir / "documents"
     docs.mkdir(parents=True, exist_ok=True)
     source = without_query(page.url) if "/compare/" in page.url else compare_url(inputs)
@@ -100,55 +141,15 @@ async def capture_documents(playwright: Playwright, browser: Browser, context: B
     with manifest.stage("capture_document"):
         if faults.is_broken("capture_document"):
             raise DocumentError("Injected failure (--break-step capture_document)")
+
+        pdf_path = docs / f"{inputs.label}.pdf"
         state = await context.storage_state()      # the signed-in session, for the printer
-
-        # ---- 1. print to PDF -------------------------------------------------
-        printer_browser = browser if headless else await playwright.chromium.launch(headless=True)
-        try:
-            printer = await printer_browser.new_context(storage_state=state,
-                                                        viewport={"width": 1280, "height": 900})
-            if on_context:
-                on_context(printer)
-            pdf_page = await printer.new_page()
-            await pdf_page.goto(source, wait_until="domcontentloaded")
-            outcome = await wait_for_comparison(pdf_page)
-            if outcome == "nothing":
-                log.warning("Document: GitHub says there is nothing to compare for these branches")
-            await _settle(pdf_page)
-            await pdf_page.evaluate(FIX_TIMES_JS)
-            await pdf_page.emulate_media(media="screen")
-            pdf_path = docs / f"{inputs.label}.pdf"
-            await pdf_page.pdf(path=str(pdf_path), format="A4", print_background=True,
-                               margin={"top": "12mm", "bottom": "12mm", "left": "10mm", "right": "10mm"})
-            await printer.close()
-        finally:
-            if printer_browser is not browser:
-                await printer_browser.close()
-
-        normalize_pdf(pdf_path)
-        if pdf_path.stat().st_size < 5_000 or not pdf_path.read_bytes().startswith(b"%PDF"):
-            raise DocumentError("The printed PDF is empty or invalid")
+        outcome = await _print_pdf(browser, state, source, pdf_path, headless, on_context)
         manifest.add_file(pdf_path, "comparison printed to PDF")
         manifest.page_visited(source, "comparison (printed)", "capture_document")
         log.info("Document: printed comparison to %s", pdf_path.relative_to(out_dir))
 
-        # ---- 2. the .patch in a new tab --------------------------------------
-        tab = await context.new_page()
-        try:
-            patch_url = source + ".patch"
-            response = await tab.goto(patch_url, wait_until="domcontentloaded")
-            if response is None or not response.ok:
-                patch_url = compare_url(inputs) + ".patch"
-                response = await tab.goto(patch_url, wait_until="domcontentloaded")
-            if response is None or not response.ok:
-                code = response.status if response else "no response"
-                raise DocumentError(f"GitHub did not return the patch (HTTP {code})")
-            body = await response.body()
-            manifest.page_visited(patch_url, "comparison as patch (new tab)", "capture_document")
-        finally:
-            await tab.close()
-            await page.bring_to_front()
-
+        body = await _fetch_patch(context, page, source, inputs, manifest)
         if outcome == "diff" and b"diff --git" not in body:
             raise DocumentError("The patch GitHub returned contains no changes")
         patch_path = docs / f"{inputs.label}.patch"

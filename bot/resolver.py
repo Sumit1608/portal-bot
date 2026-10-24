@@ -25,6 +25,8 @@ from typing import Callable
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Frame, Locator, Page
 
+from .errors import RetryableError
+
 log = logging.getLogger("bot.resolver")
 
 Text = str | re.Pattern
@@ -44,7 +46,7 @@ class Target:
     first_if_many: bool = False       # several equivalent matches (e.g. two identical links) are OK
 
 
-class ResolveError(RuntimeError):
+class ResolveError(RetryableError):
     def __init__(self, key: str, attempts: list[dict]):
         self.key = key
         self.attempts = attempts
@@ -84,7 +86,8 @@ def plan(target: Target) -> list[tuple[str, str, Callable[[Frame], Locator]]]:
     return steps
 
 
-async def _visible(locator: Locator, limit: int = 20) -> list[int]:
+async def visible_indexes(locator: Locator, limit: int = 20) -> list[int]:
+    """Positions (up to `limit`) of the matches that are visible right now."""
     try:
         count = await locator.count()
     except PlaywrightError:
@@ -106,6 +109,8 @@ class Resolver:
 
     async def find(self, page: Page, target: Target, timeout: float = 10.0,
                    quiet: bool = False) -> Locator:
+        """Retry the whole plan until one strategy wins or `timeout` runs out.
+        quiet=True: a miss is expected (a probe), so it is not logged as a warning."""
         deadline = time.monotonic() + timeout
         while True:
             attempts: list[dict] = []
@@ -116,14 +121,14 @@ class Resolver:
                         locator = build(frame)
                     except PlaywrightError:
                         continue
-                    for i in await _visible(locator):
+                    for i in await visible_indexes(locator):
                         hits.append((frame, locator.nth(i)))
                 n = len(hits)
-                result = "unique" if n == 1 else "not found" if n == 0 else f"ambiguous ({n})"
-                if n > 1 and target.first_if_many:
-                    result = f"{n} equivalent matches, took the first"
+                accept = n == 1 or (n > 1 and target.first_if_many)
+                result = ("unique" if n == 1 else "not found" if n == 0
+                          else f"{n} equivalent matches, took the first" if accept else f"ambiguous ({n})")
                 attempts.append({"strategy": strategy, "query": query, "matches": n, "result": result})
-                if n == 1 or (n > 1 and target.first_if_many):
+                if accept:
                     frame, element = hits[0]
                     where = "" if frame == page.main_frame else " (inside an iframe)"
                     self.attempts[target.key] = attempts
@@ -132,7 +137,7 @@ class Resolver:
                     return element
             self.attempts[target.key] = attempts
             if time.monotonic() > deadline:
-                log.log(logging.DEBUG if quiet else logging.WARNING, "Resolver: %s NOT found - %s", target.key,
-                            "; ".join(f"{a['strategy']}: {a['result']}" for a in attempts))
+                log.log(logging.DEBUG if quiet else logging.WARNING, "Resolver: %s NOT found - %s",
+                        target.key, "; ".join(f"{a['strategy']}: {a['result']}" for a in attempts))
                 raise ResolveError(target.key, attempts)
             await asyncio.sleep(0.25)

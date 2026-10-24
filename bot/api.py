@@ -1,5 +1,6 @@
 """A small HTTP API in front of the job queue (Python standard library only).
 
+    GET  /                the small web UI (bot/ui/)          no token needed (holds no data)
     GET  /health          {"ok": true}                       no token needed
     POST /jobs            body: input JSON (+ optional "break_step") -> 201 and the job
     GET  /jobs            {"jobs": [...]} every job, oldest first
@@ -13,13 +14,31 @@ import hmac
 import json
 import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Callable
 
 from .inputs import InputError
 from .jobs import JobQueue
 
 MAX_BODY = 64 * 1024                 # an input file is a few hundred bytes
+MAX_DISCARD = 1024 * 1024            # an oversized body is read and dropped up to this much
 log = logging.getLogger("bot.api")
+
+# The small web UI (bot/ui/): open http://127.0.0.1:8000/ in a browser.
+UI_DIR = Path(__file__).resolve().parent / "ui"
+UI_FILES = {                                     # fixed list: no path from the request reaches the disk
+    "": ("index.html", "text/html; charset=utf-8"),
+    "/ui": ("index.html", "text/html; charset=utf-8"),
+    "/ui.js": ("ui.js", "text/javascript; charset=utf-8"),
+    "/ui.css": ("ui.css", "text/css; charset=utf-8"),
+}
+# only this API's own files and calls; no inline code, no other sites, no framing
+UI_HEADERS = {
+    "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+                               "img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
 
 
 class ApiServer(ThreadingHTTPServer):
@@ -42,9 +61,13 @@ class Handler(BaseHTTPRequestHandler):
 
     # ------------------------------------------------------------ routes
     def do_GET(self) -> None:
-        path = self.path.split("?", 1)[0].rstrip("/")
+        path = self._route()
         if path == "/health":
             return self._send(200, {"ok": True})
+        if path in UI_FILES:                     # the page holds no data; its API calls need the token
+            return self._send_file(*UI_FILES[path])
+        if path == "/favicon.ico":               # browsers ask for it on their own: no icon, no 401 noise
+            return self._respond(204, b"", "image/x-icon")
         if not self._authorized():
             return
         q = self.server.queue
@@ -57,21 +80,29 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_POST(self) -> None:
-        path = self.path.split("?", 1)[0].rstrip("/")
-        if path != "/jobs":
-            return self._send(404, {"error": "not found"})
-        if not self._authorized():
-            return
+        # Take in the whole body BEFORE any answer (even 401/404/413): closing a
+        # connection with unread data makes Windows abort it, and the client
+        # would get a network error instead of the answer.
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = -1
-        if length <= 0:
-            return self._send(400, {"error": "send the input JSON as the request body"})
         if length > MAX_BODY:
-            return self._send(413, {"error": f"body larger than {MAX_BODY} bytes"})
+            self._discard(min(length, MAX_DISCARD))
+            self.close_connection = True
+            return self._send(413, {"error": f"body larger than {MAX_BODY} bytes"},
+                              extra={"Connection": "close"})
+        raw = self.rfile.read(length) if length > 0 else b""
+
+        path = self._route()
+        if path != "/jobs":
+            return self._send(404, {"error": "not found"})
+        if not self._authorized():
+            return
+        if not raw:
+            return self._send(400, {"error": "send the input JSON as the request body"})
         try:
-            body = json.loads(self.rfile.read(length).decode("utf-8-sig"))
+            body = json.loads(raw.decode("utf-8-sig"))
         except (UnicodeDecodeError, json.JSONDecodeError) as e:
             return self._send(400, {"error": f"body is not valid JSON: {e}"})
         if not isinstance(body, dict):
@@ -82,7 +113,7 @@ class Handler(BaseHTTPRequestHandler):
         except InputError as e:
             return self._send(400, {"error": str(e)})
         log.info("API: queued job %s", job.id)
-        self._send(201, job.data, location=f"/jobs/{job.id}")
+        self._send(201, job.data, extra={"Location": f"/jobs/{job.id}"})
 
     def do_PUT(self) -> None:
         self._send(405, {"error": "method not allowed"})
@@ -90,6 +121,16 @@ class Handler(BaseHTTPRequestHandler):
     do_DELETE = do_PATCH = do_PUT
 
     # ------------------------------------------------------------ helpers
+    def _route(self) -> str:
+        return self.path.split("?", 1)[0].rstrip("/")
+
+    def _discard(self, length: int) -> None:
+        while length > 0:
+            chunk = self.rfile.read(min(length, 65536))
+            if not chunk:
+                break
+            length -= len(chunk)
+
     def _authorized(self) -> bool:
         given = self.headers.get("Authorization", "")
         expected = f"Bearer {self.server.token}"
@@ -99,20 +140,23 @@ class Handler(BaseHTTPRequestHandler):
                    extra={"WWW-Authenticate": "Bearer"})
         return False
 
-    def _send(self, status: int, payload: dict, location: str | None = None,
-              extra: dict | None = None) -> None:
-        body = json.dumps(payload, indent=2).encode("utf-8")
+    def _respond(self, status: int, body: bytes, content_type: str, headers: dict | None = None) -> None:
         self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        if location:
-            self.send_header("Location", location)
-        for name, value in (extra or {}).items():
+        for name, value in (headers or {}).items():
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
+    def _send(self, status: int, payload: dict, extra: dict | None = None) -> None:
+        self._respond(status, json.dumps(payload, indent=2).encode("utf-8"),
+                      "application/json; charset=utf-8", extra)
+
+    def _send_file(self, name: str, content_type: str) -> None:
+        self._respond(200, (UI_DIR / name).read_bytes(), content_type, UI_HEADERS)
+
     def log_message(self, fmt: str, *args) -> None:
         # method, path and status only; headers (the token) are never logged
-        log.info("API: %s %s -> %s", self.command, self.path.split("?", 1)[0], args[1] if len(args) > 1 else "")
+        log.info("API: %s %s -> %s", self.command, self._route() or "/", args[1] if len(args) > 1 else "")

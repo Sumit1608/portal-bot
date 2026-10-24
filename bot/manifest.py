@@ -1,7 +1,7 @@
 """The JSON manifest: a record of one run.
 
-It holds the inputs, every page visited, how long each stage took, and every
-captured file (with size and SHA-256 hash, so two runs can be compared).
+It holds the inputs, every page visited, how long each stage took, every retry,
+and every captured file (with size and SHA-256 hash, so two runs can be compared).
 """
 import hashlib
 import json
@@ -9,19 +9,12 @@ import os
 import platform
 import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
 
+from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import Page
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def _clean_url(url: str) -> str:
-    """Drop query string and fragment - they can carry tokens."""
-    parts = urlsplit(url)
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+from .util import utc_now, without_query, write_atomic
 
 
 def sha256_of(path: Path) -> str:
@@ -40,7 +33,7 @@ class Manifest:
         self.data = {
             "run_id": run_id,
             "status": "running",
-            "started_at": _now(),
+            "started_at": utc_now(),
             "finished_at": None,
             "total_seconds": None,
             "input_file": str(input_file),
@@ -76,8 +69,15 @@ class Manifest:
 
     def page_visited(self, url: str, title: str, stage: str) -> None:
         self.data["pages_visited"].append(
-            {"url": _clean_url(url), "title": title, "stage": stage, "at": _now()}
-        )
+            {"url": without_query(url), "title": title, "stage": stage, "at": utc_now()})
+
+    async def visit(self, page: Page, stage: str) -> None:
+        """Record the page the browser is on now."""
+        try:
+            title = await page.title()
+        except PlaywrightError:
+            title = ""
+        self.page_visited(page.url, title, stage)
 
     def add_file(self, path: Path, kind: str) -> None:
         self.data["captured_files"].append({
@@ -90,13 +90,10 @@ class Manifest:
     def finish(self, status: str, error: str | None = None) -> None:
         self.data["status"] = status
         self.data["error"] = error
-        self.data["finished_at"] = _now()
+        self.data["finished_at"] = utc_now()
         self.data["total_seconds"] = round(time.perf_counter() - self._t0, 3)
 
     def write(self) -> Path:
-        self.out_dir.mkdir(parents=True, exist_ok=True)
         target = self.out_dir / "manifest.json"
-        tmp = target.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(self.data, indent=2), encoding="utf-8")
-        tmp.replace(target)   # atomic: never leaves a half-written manifest
+        write_atomic(target, json.dumps(self.data, indent=2))
         return target

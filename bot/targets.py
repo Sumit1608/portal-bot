@@ -70,7 +70,6 @@ REPO_PULLS_TAB = Target(
 NEW_PULL_REQUEST = Target(
     key="pulls.new",
     role="link", name="New pull request", more_roles=("button",),
-    near_text=None,
     structure=("a[href$='/compare']", "a[href*='/compare']"),
     first_if_many=True,        # an empty repo shows the button twice, both open the same form
 )
@@ -80,7 +79,6 @@ NEW_PULL_REQUEST = Target(
 COMPARE_ACROSS_FORKS = Target(
     key="compare.across_forks",
     role="link", name=re.compile(r"compare across forks", re.I), more_roles=("button",),
-    near_text=None,
     structure=("a[href*='compare'][data-cross-repo]",),
     id_or_class=(".js-toggle-range-editor-cross-repo",),
 )

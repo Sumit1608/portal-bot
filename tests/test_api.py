@@ -88,6 +88,12 @@ def test_unknown_paths_are_404(api, path):
     assert call(f"{base}{path}")[0] == 404
 
 
+def test_post_to_unknown_path_is_404(api):
+    base, queue = api
+    assert call(f"{base}/other", "POST", INPUT)[0] == 404
+    assert queue.list() == []
+
+
 def test_server_refuses_to_start_without_token(tmp_path):
     with pytest.raises(ValueError):
         ApiServer(("127.0.0.1", 0), JobQueue(tmp_path / "jobs"), "")

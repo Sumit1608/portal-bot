@@ -8,12 +8,14 @@ import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .errors import FinalError
+
 REPO_PATTERN = re.compile(r"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")       # owner/name
 BRANCH_PATTERN = re.compile(r"^[^\s~^:?*\[\\]+$")                    # git-safe name
 PLACEHOLDER = "YOUR_GITHUB_USERNAME"
 
 
-class InputError(ValueError):
+class InputError(FinalError):
     """The input file is missing, unreadable, or has a bad value."""
 
 

@@ -8,11 +8,14 @@
     jobs/logs/<id>.log        console output of that run (already redacted by run.py)
 
 A job moves between folders by renaming its file, which is atomic, so a job
-is never in two states at once. Only one worker may run at a time (the saved
-GitHub session is shared): the worker holds an OS lock on jobs/worker.lock,
-which the OS releases if the worker crashes. On start, a worker puts jobs
+is never in two states at once (and two parallel slots never take the same
+job). One worker process serves the queue: it holds an OS lock on
+jobs/worker.lock, which the OS releases if the worker crashes. That worker can
+run up to MAX_PARALLEL jobs at once (parallel=N); the runs share the saved
+login safely through the session lock in run.py. On start, a worker puts jobs
 left in running/ by a crashed worker back into pending/.
 """
+import argparse
 import json
 import os
 import re
@@ -21,20 +24,35 @@ import subprocess
 import sys
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
 from . import faults
+from .config import ROOT
+from .filelock import FileLock
 from .inputs import InputError, RunInputs, load_inputs, parse_inputs
+from .util import retry_busy, utc_now, write_atomic
 
 STATES = ("pending", "running", "done", "failed")
 JOB_ID = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
 JOB_TIMEOUT = 15 * 60            # seconds; a run normally takes under a minute
+MAX_PARALLEL = 4                 # each job is a full browser; more mostly adds memory use
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+def parallel_count(text: str) -> int:
+    """argparse type for --parallel: a whole number from 1 to MAX_PARALLEL."""
+    try:
+        n = int(text)
+    except ValueError:
+        n = 0
+    if not 1 <= n <= MAX_PARALLEL:
+        raise argparse.ArgumentTypeError(f"must be a whole number from 1 to {MAX_PARALLEL}")
+    return n
+
+
+def _read_json(path: Path) -> dict:
+    return retry_busy(lambda: json.loads(path.read_text(encoding="utf-8")))
 
 
 class WorkerBusy(RuntimeError):
@@ -56,7 +74,8 @@ class JobQueue:
         self.root = root
         for name in (*STATES, "inputs", "logs"):
             (root / name).mkdir(parents=True, exist_ok=True)
-        self._lock_file = None
+        self._worker_lock = FileLock(root / "worker.lock")
+        self._claim_lock = threading.Lock()
 
     # ------------------------------------------------------------ adding
     def add(self, input_file: str | Path, break_step: str | None = None) -> Job:
@@ -79,7 +98,7 @@ class JobQueue:
         data = {
             "id": job_id,
             "status": "pending",
-            "created_at": _now(),
+            "created_at": utc_now(),
             "started_at": None,
             "finished_at": None,
             "input_file": source,
@@ -96,30 +115,17 @@ class JobQueue:
 
     # ------------------------------------------------------------ worker side
     def acquire_worker_lock(self) -> None:
-        fh = open(self.root / "worker.lock", "a+")
-        try:
-            if os.name == "nt":
-                import msvcrt
-                fh.seek(0)
-                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            fh.close()
-            raise WorkerBusy("another worker is already running on this queue") from None
-        self._lock_file = fh
+        if not self._worker_lock.try_acquire():
+            raise WorkerBusy("another worker is already running on this queue")
 
     def release_worker_lock(self) -> None:
-        if self._lock_file:
-            self._lock_file.close()          # closing the file releases the lock
-            self._lock_file = None
+        self._worker_lock.release()
 
     def recover(self) -> list[str]:
         """Put jobs a crashed worker left in running/ back at the front of the queue."""
         recovered = []
         for path in sorted((self.root / "running").glob("*.json")):
-            job = Job(path, json.loads(path.read_text(encoding="utf-8")))
+            job = Job(path, _read_json(path))
             job.data.update(status="pending", started_at=None)
             self._move(job, "pending")
             recovered.append(job.id)
@@ -127,22 +133,26 @@ class JobQueue:
 
     def claim(self) -> Job | None:
         """Take the oldest pending job, or None if the queue is empty."""
-        for path in sorted((self.root / "pending").glob("*.json")):
-            target = self.root / "running" / path.name
-            try:
-                path.replace(target)
-            except FileNotFoundError:
-                continue                           # removed meanwhile
-            job = Job(target, json.loads(target.read_text(encoding="utf-8")))
-            job.data.update(status="running", started_at=_now())
-            self._write(target, job.data)
-            return job
+        # Parallel slots are threads of one worker process (the worker lock
+        # ensures one process). On Windows two threads renaming the same file at
+        # once can both "succeed", so slots take their turn here.
+        with self._claim_lock:
+            for path in sorted((self.root / "pending").glob("*.json")):
+                target = self.root / "running" / path.name
+                try:
+                    path.replace(target)
+                except (FileNotFoundError, PermissionError):
+                    continue                       # removed meanwhile
+                job = Job(target, _read_json(target))
+                job.data.update(status="running", started_at=utc_now())
+                self._write(target, job.data)
+                return job
         return None
 
     def finish(self, job: Job, exit_code: int, manifest: dict | None, error: str | None = None) -> None:
         job.data.update(
             status="done" if exit_code == 0 else "failed",
-            finished_at=_now(),
+            finished_at=utc_now(),
             exit_code=exit_code,
             run_status=manifest.get("status") if manifest else None,
             error=error or (manifest.get("error") if manifest else None),
@@ -155,7 +165,7 @@ class JobQueue:
         for state in STATES:
             for path in (self.root / state).glob("*.json"):
                 try:
-                    jobs.append(json.loads(path.read_text(encoding="utf-8")))
+                    jobs.append(_read_json(path))
                 except FileNotFoundError:
                     pass                           # moved to its next state meanwhile
         return sorted(jobs, key=lambda j: j["id"])
@@ -166,7 +176,7 @@ class JobQueue:
         for _ in range(2):                         # a second look if it moved while we searched
             for state in STATES:
                 try:
-                    return json.loads((self.root / state / f"{job_id}.json").read_text(encoding="utf-8"))
+                    return _read_json(self.root / state / f"{job_id}.json")
                 except FileNotFoundError:
                     continue
         return None
@@ -184,14 +194,12 @@ class JobQueue:
     def _move(self, job: Job, state: str) -> None:
         target = self.root / state / job.path.name
         self._write(job.path, job.data)
-        job.path.replace(target)
+        retry_busy(lambda: job.path.replace(target))
         job.path = target
 
     @staticmethod
     def _write(path: Path, data: dict) -> None:
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        tmp.replace(path)
+        write_atomic(path, json.dumps(data, indent=2))
 
 
 # ---------------------------------------------------------------- running
@@ -202,7 +210,7 @@ def subprocess_runner(args: list[str], log_file: Path) -> int:
     """Run `python run.py ...` as its own process, console output to log_file."""
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     with open(log_file, "w", encoding="utf-8") as log:
-        proc = subprocess.run([sys.executable, *args], cwd=Path(__file__).resolve().parent.parent,
+        proc = subprocess.run([sys.executable, *args], cwd=ROOT,
                               stdout=log, stderr=subprocess.STDOUT, env=env, timeout=JOB_TIMEOUT)
     return proc.returncode
 
@@ -234,31 +242,51 @@ def run_job(queue: JobQueue, job: Job, output_root: Path, headless: bool = True,
 def work_loop(queue: JobQueue, output_root: Path, headless: bool = True, once: bool = False,
               watch: bool = False, stop: threading.Event | None = None,
               say: Callable[[str], None] = print, poll_seconds: float = 5,
-              runner: Runner = subprocess_runner) -> tuple[int, int]:
-    """Run queued jobs one after another; returns (done, failed).
+              runner: Runner = subprocess_runner, parallel: int = 1) -> tuple[int, int]:
+    """Run queued jobs, up to `parallel` at the same time; returns (done, failed).
 
-    The caller must hold the worker lock. Stops when the queue is empty,
-    unless watch=True, then it waits for new jobs until `stop` is set.
+    Each of the `parallel` slots takes the oldest pending job, runs it, and
+    takes the next. The caller must hold the worker lock. Stops when the queue
+    is empty (once=True: after one job per slot), unless watch=True, then it
+    waits for new jobs until `stop` is set.
     """
+    if not 1 <= parallel <= MAX_PARALLEL:
+        raise ValueError(f"parallel must be between 1 and {MAX_PARALLEL}")
     stop = stop or threading.Event()
     for job_id in queue.recover():
         say(f"recovered {job_id} (left running by a stopped worker) - it will run again")
-    done = failed = 0
-    while not stop.is_set():
-        job = queue.claim()
-        if job is None:
-            if watch and not once:
-                stop.wait(poll_seconds)
-                continue
-            break
-        say(f"running {job.id} ...")
-        run_job(queue, job, output_root, headless=headless, runner=runner)
-        if job.data["status"] == "done":
-            done += 1
-            say(f"  done    -> {job.data['output_dir']}")
-        else:
-            failed += 1
-            say(f"  FAILED  -> {job.data['error']}  (log: jobs/logs/{job.id}.log)")
-        if once:
-            break
-    return done, failed
+    totals = {"done": 0, "failed": 0}
+    count_lock = threading.Lock()
+    tag = (lambda n: f"[{n}] ") if parallel > 1 else (lambda n: "")
+
+    def slot(n: int) -> None:
+        while not stop.is_set():
+            job = queue.claim()                    # atomic: two slots never get the same job
+            if job is None:
+                if watch and not once:
+                    stop.wait(poll_seconds)
+                    continue
+                return
+            say(f"{tag(n)}running {job.id} ...")
+            run_job(queue, job, output_root, headless=headless, runner=runner)
+            ok = job.data["status"] == "done"
+            with count_lock:
+                totals["done" if ok else "failed"] += 1
+            if ok:
+                say(f"{tag(n)}  done    -> {job.data['output_dir']}")
+            else:
+                say(f"{tag(n)}  FAILED  -> {job.data['error']}  (log: jobs/logs/{job.id}.log)")
+            if once:
+                return
+
+    if parallel == 1:
+        slot(1)
+    else:
+        threads = [threading.Thread(target=slot, args=(n,), name=f"slot-{n}", daemon=True)
+                   for n in range(1, parallel + 1)]
+        for t in threads:
+            t.start()
+        while any(t.is_alive() for t in threads):
+            for t in threads:
+                t.join(0.5)                        # short joins keep Ctrl+C working on Windows
+    return totals["done"], totals["failed"]

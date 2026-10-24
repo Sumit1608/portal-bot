@@ -9,15 +9,12 @@ found, never the value. Images and PDFs are skipped. Exit code 1 if anything is 
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dotenv import load_dotenv  # noqa: E402
+from bot.config import ROOT, load_settings  # noqa: E402
+from bot.secrets_scan import scan_path  # noqa: E402
 
-from bot.secrets_scan import load_secrets, scan_path  # noqa: E402
-
-load_dotenv(ROOT / ".env")
-secrets = load_secrets()
+secrets = load_settings().secrets()
 found = 0
 for arg in sys.argv[1:] or ["fixtures"]:
     target = ROOT / arg
