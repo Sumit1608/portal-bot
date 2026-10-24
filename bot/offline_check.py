@@ -85,7 +85,7 @@ async def run_offline_check(fixtures_dir: Path, out_dir: Path) -> list[dict]:
                 source = fixtures_dir / fixture
                 if not source.exists():
                     results.append({"fixture": fixture, "mutation": "-", "target": "-",
-                                    "found": False, "strategy": "fixture file missing"})
+                                    "found": None, "strategy": "skipped - page not captured yet"})
                     continue
                 html = source.read_text(encoding="utf-8")
                 for mutation in ORDER:

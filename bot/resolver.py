@@ -35,11 +35,13 @@ CONTROLS = "self::input[not(@type='hidden')] or self::textarea or self::select o
 class Target:
     key: str                          # stable name used in logs and evidence, e.g. "login.username"
     role: str | None = None           # ARIA role: "textbox", "button", "combobox", ...
+    more_roles: tuple[str, ...] = ()  # other roles the same element may have (tried after `role`)
     name: Text | None = None          # accessible name for the role strategy
     label: Text | None = None         # visible <label> text
     near_text: Text | None = None     # visible text just before the element
     structure: tuple[str, ...] = ()   # attribute-based CSS, no ids/classes
     id_or_class: tuple[str, ...] = () # last resort
+    first_if_many: bool = False       # several equivalent matches (e.g. two identical links) are OK
 
 
 class ResolveError(RuntimeError):
@@ -62,12 +64,12 @@ def plan(target: Target) -> list[tuple[str, str, Callable[[Frame], Locator]]]:
     """The ordered list of (strategy, human-readable query, locator builder)."""
     steps: list[tuple[str, str, Callable[[Frame], Locator]]] = []
     t = target
-    if t.role:
+    for role in ((t.role,) + t.more_roles if t.role else ()):
         if t.name is not None:
-            steps.append(("role", f"role={t.role} name={_show(t.name)}",
-                          lambda f: f.get_by_role(t.role, name=t.name, exact=_exact(t.name))))
+            steps.append(("role", f"role={role} name={_show(t.name)}",
+                          lambda f, role=role: f.get_by_role(role, name=t.name, exact=_exact(t.name))))
         else:
-            steps.append(("role", f"role={t.role}", lambda f: f.get_by_role(t.role)))
+            steps.append(("role", f"role={role}", lambda f, role=role: f.get_by_role(role)))
     if t.label is not None:
         steps.append(("label", f"label={_show(t.label)}",
                       lambda f: f.get_by_label(t.label, exact=_exact(t.label))))
@@ -102,7 +104,8 @@ class Resolver:
         self.attempts: dict[str, list[dict]] = {}
         self.winners: dict[str, str] = {}
 
-    async def find(self, page: Page, target: Target, timeout: float = 10.0) -> Locator:
+    async def find(self, page: Page, target: Target, timeout: float = 10.0,
+                   quiet: bool = False) -> Locator:
         deadline = time.monotonic() + timeout
         while True:
             attempts: list[dict] = []
@@ -117,8 +120,10 @@ class Resolver:
                         hits.append((frame, locator.nth(i)))
                 n = len(hits)
                 result = "unique" if n == 1 else "not found" if n == 0 else f"ambiguous ({n})"
+                if n > 1 and target.first_if_many:
+                    result = f"{n} equivalent matches, took the first"
                 attempts.append({"strategy": strategy, "query": query, "matches": n, "result": result})
-                if n == 1:
+                if n == 1 or (n > 1 and target.first_if_many):
                     frame, element = hits[0]
                     where = "" if frame == page.main_frame else " (inside an iframe)"
                     self.attempts[target.key] = attempts
@@ -127,7 +132,7 @@ class Resolver:
                     return element
             self.attempts[target.key] = attempts
             if time.monotonic() > deadline:
-                log.warning("Resolver: %s NOT found - %s", target.key,
+                log.log(logging.DEBUG if quiet else logging.WARNING, "Resolver: %s NOT found - %s", target.key,
                             "; ".join(f"{a['strategy']}: {a['result']}" for a in attempts))
                 raise ResolveError(target.key, attempts)
             await asyncio.sleep(0.25)

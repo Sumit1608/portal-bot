@@ -139,6 +139,28 @@ python scripts/corrupt_session.py                     # scramble the saved cooki
 python run.py --input inputs/example.json            # dead session detected, full login
 ```
 
+### Navigation and the form with a dependent field
+
+After sign-in the bot clicks through three pages, as a person would:
+**repository → Pull requests → New pull request**, which opens GitHub's
+**Compare** form. With "compare across forks" switched on, the form has four
+fields, all taken from the input file:
+
+| Field | Input | Depends on |
+|---|---|---|
+| base repository | `base_repo` | |
+| base branch | `base_branch` | base repository |
+| head repository | `head_repo` | |
+| compare branch | `head_branch` | head repository |
+
+The branch pickers are dependent: after a repository is chosen, its branch
+list reloads with that repository's branches. The bot waits for the reloaded
+list, filters it, and selects the requested branch only if it is really
+offered. If it is not (a typo, or a branch that exists only in the other
+repository), the run stops with a clear input error rather than picking
+something else. After filling, every field is read back and compared with the
+input, and the values are written to the manifest under `form`.
+
 ### Locator strategy: order and why
 
 No step depends on a single CSS or XPath string. Every element is described

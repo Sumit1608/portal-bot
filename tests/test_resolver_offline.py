@@ -15,5 +15,5 @@ FIXTURES = ROOT / "fixtures"
                     reason="saved pages not captured yet (run.py --capture-fixtures)")
 def test_all_targets_found_in_all_mutations(tmp_path):
     results = asyncio.run(run_offline_check(FIXTURES, tmp_path))
-    missing = [f"{r['fixture']}/{r['mutation']}/{r['target']}" for r in results if not r["found"]]
+    missing = [f"{r['fixture']}/{r['mutation']}/{r['target']}" for r in results if r["found"] is False]
     assert not missing, f"not found: {missing}"

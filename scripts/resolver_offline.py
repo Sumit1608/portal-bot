@@ -23,11 +23,12 @@ results = asyncio.run(run_offline_check(ROOT / "fixtures", ROOT / "output" / "re
 print(f"{'page':<18} {'mutation':<20} {'element':<16} result")
 print("-" * 72)
 for r in results:
-    mark = r["strategy"] if r["found"] else "*** " + r["strategy"] + " ***"
+    mark = r["strategy"] if r["found"] is not False else "*** " + r["strategy"] + " ***"
     print(f"{r['fixture'].replace('.html', ''):<18} {r['mutation']:<20} {r['target']:<16} {mark}")
 
-failed = [r for r in results if not r["found"]]
+failed = [r for r in results if r["found"] is False]
+checked = [r for r in results if r["found"] is not None]
 print("-" * 72)
-print(f"{len(results) - len(failed)}/{len(results)} found. "
+print(f"{len(checked) - len(failed)}/{len(checked)} found. "
       f"Mutated pages: output/resolver-offline/")
 sys.exit(1 if failed else 0)

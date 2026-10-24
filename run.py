@@ -3,8 +3,9 @@
     python run.py --input inputs/example.json [--headless] [--fresh]
 
 Current version: loads inputs, signs in to GitHub (reusing the saved session
-when it is still alive, otherwise a full login with 2FA), opens the
-repository page, and writes the manifest and a redacted run.log.
+when it is still alive, otherwise a full login with 2FA), clicks through
+repository -> Pull requests -> New pull request, fills the 4-field Compare
+form, and writes the manifest and a redacted run.log.
 """
 import argparse
 import asyncio
@@ -17,6 +18,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
+from bot.compare_flow import CompareForm
 from bot.github_login import GitHubAuth
 from bot.inputs import InputError, load_inputs
 from bot.log import setup_logging
@@ -34,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--headless", action="store_true", help="run without a visible browser window")
     p.add_argument("--fresh", action="store_true", help="delete the saved session first (forces a full login)")
     p.add_argument("--capture-fixtures", action="store_true",
-                   help="save cleaned copies of the login and 2FA pages to fixtures/ (implies --fresh)")
+                   help="save cleaned copies of the login, 2FA and compare pages to fixtures/ (implies --fresh)")
     return p.parse_args()
 
 
@@ -82,13 +84,10 @@ async def main() -> int:
                 context, page = await auth.open(browser)
                 context.set_default_timeout(20_000)
 
-                with manifest.stage("open_repo"):
-                    url = f"https://github.com/{inputs.base_repo}"
-                    response = await page.goto(url, wait_until="domcontentloaded")
-                    if response is None or response.status >= 400:
-                        code = response.status if response else "no response"
-                        raise RuntimeError(f"Could not open {url} (HTTP {code})")
-                    manifest.page_visited(page.url, await page.title(), "open_repo")
+                form = CompareForm(page, auth.resolver, manifest,
+                                   capture_dir=capture, identifiers=[username])
+                await form.navigate(inputs.base_repo)
+                await form.fill(inputs)
             finally:
                 await browser.close()
         status = "success"
